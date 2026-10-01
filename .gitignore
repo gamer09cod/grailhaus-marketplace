@@ -1,0 +1,12 @@
+node_modules/
+.expo/
+dist/
+ios/
+android/
+.env
+.env.*
+supabase/.branches/
+supabase/.temp/
+supabase/.env
+*.jks
+*.keystore
