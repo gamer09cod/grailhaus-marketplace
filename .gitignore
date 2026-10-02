@@ -5,6 +5,7 @@ ios/
 android/
 .env
 .env.*
+!**/.env.example
 supabase/.branches/
 supabase/.temp/
 supabase/.env

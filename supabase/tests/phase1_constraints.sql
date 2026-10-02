@@ -311,12 +311,26 @@ with created as (
   insert into public.pack_skus (
     category, name, tier, price_cents, stock_total, stock_on_hand, stock_reserved
   ) values (
-    'TRADING_CARD', 'Phase 1 Test Pack', 'Starter', 1000, 5, 5, 0
+    'TRADING_CARD', 'Phase 1 Test Pack', 'Phase1', 1000, 5, 5, 0
   )
   returning id
 )
 insert into test_ids (label, id)
 select 'sku', id from created;
+
+with created as (
+  insert into public.catalog_items (
+    category, name, rarity, base_value_cents, current_value_cents
+  ) values
+    ('TRADING_CARD', 'Phase 1 Common', 'COMMON', 100, 100),
+    ('TRADING_CARD', 'Phase 1 Legendary', 'LEGENDARY', 5000, 5000),
+    ('TRADING_CARD', 'Phase 1 Rare', 'RARE', 1000, 1000)
+  returning id, rarity
+)
+insert into public.pack_sku_items (pack_sku_id, catalog_item_id)
+select sku.id, created.id
+from created
+join test_ids sku on sku.label = 'sku';
 
 insert into public.pack_odds (pack_sku_id, rarity, probability_basis_points)
 select id, 'COMMON', 7000 from test_ids where label = 'sku'

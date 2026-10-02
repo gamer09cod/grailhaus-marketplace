@@ -1,0 +1,65 @@
+import { NavigationContainer, DarkTheme } from "@react-navigation/native";
+import { createNativeStackNavigator } from "@react-navigation/native-stack";
+import { ActivityIndicator, StyleSheet, View } from "react-native";
+
+import { useAuth } from "../features/auth/AuthProvider";
+import { AuthScreen } from "../features/auth/AuthScreen";
+import { WalletScreen } from "../features/wallet/WalletScreen";
+
+type AuthStackParamList = {
+  SignIn: undefined;
+};
+
+type AppStackParamList = {
+  Wallet: undefined;
+};
+
+const AuthStack = createNativeStackNavigator<AuthStackParamList>();
+const AppStack = createNativeStackNavigator<AppStackParamList>();
+
+const theme = {
+  ...DarkTheme,
+  colors: {
+    ...DarkTheme.colors,
+    background: "#12110f",
+    card: "#12110f",
+    text: "#f4efe6",
+    border: "#2a2723",
+    primary: "#e4c07a",
+  },
+};
+
+export function RootNavigator() {
+  const { session, ready } = useAuth();
+
+  if (!ready) {
+    return (
+      <View style={styles.loading}>
+        <ActivityIndicator color="#e4c07a" />
+      </View>
+    );
+  }
+
+  return (
+    <NavigationContainer theme={theme}>
+      {session ? (
+        <AppStack.Navigator screenOptions={{ headerShown: false }}>
+          <AppStack.Screen name="Wallet" component={WalletScreen} />
+        </AppStack.Navigator>
+      ) : (
+        <AuthStack.Navigator screenOptions={{ headerShown: false }}>
+          <AuthStack.Screen name="SignIn" component={AuthScreen} />
+        </AuthStack.Navigator>
+      )}
+    </NavigationContainer>
+  );
+}
+
+const styles = StyleSheet.create({
+  loading: {
+    flex: 1,
+    backgroundColor: "#12110f",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+});

@@ -1,4 +1,3 @@
-
 export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[]
 
 export type Database = {
@@ -250,6 +249,31 @@ isOneToOne: false
       referencedColumns: ["id"]
     }
                   ]
+                },"pack_sku_items": {
+                  Row: {
+                    "catalog_item_id": string,"pack_sku_id": string
+                  }
+                  Insert: {
+                    "catalog_item_id": string,"pack_sku_id": string
+                  }
+                  Update: {
+                    "catalog_item_id"?: string,"pack_sku_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "pack_sku_items_catalog_item_id_fkey"
+      columns: ["catalog_item_id"]
+isOneToOne: false
+      referencedRelation: "catalog_items"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "pack_sku_items_pack_sku_id_fkey"
+      columns: ["pack_sku_id"]
+isOneToOne: false
+      referencedRelation: "pack_skus"
+      referencedColumns: ["id"]
+    }
+                  ]
                 },"pack_skus": {
                   Row: {
                     "active": boolean,"category": string,"created_at": string,"id": string,"is_drop": boolean,"max_per_user": number | null,"name": string,"price_cents": number,"stock_on_hand": number,"stock_reserved": number,"stock_total": number,"tier": string,"updated_at": string
@@ -364,7 +388,10 @@ isOneToOne: true
                 }
           }
           Functions: {
-            "derive_drop_status":
+            "deposit":
+{ Args: { "p_amount_cents": number,"p_idempotency_key": string }; Returns: Json
+                           },
+"derive_drop_status":
 { Args: { "ends_at": string,"starts_at": string,"stock_on_hand": number,"stock_reserved": number }; Returns: string
                            },
 "marketplace_fee_cents":

@@ -1,0 +1,19 @@
+{
+  "expo": {
+    "name": "GrailHaus",
+    "slug": "grailhaus",
+    "scheme": "grailhaus",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.grailhaus.app"
+    },
+    "android": {
+      "package": "com.grailhaus.app",
+      "usesCleartextTraffic": true
+    }
+  }
+}
