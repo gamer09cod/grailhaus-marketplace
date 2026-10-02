@@ -4,5 +4,6 @@ export type AppStackParamList = {
   Shelf: undefined;
   Category: { category: PackCategory };
   PackDetail: { packId: string };
+  Cart: undefined;
   Wallet: undefined;
 };

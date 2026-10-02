@@ -4,6 +4,7 @@ import { ActivityIndicator, StyleSheet, View } from "react-native";
 
 import { useAuth } from "../features/auth/AuthProvider";
 import { AuthScreen } from "../features/auth/AuthScreen";
+import { CartScreen } from "../features/cart/CartScreen";
 import { CategoryScreen } from "../features/shelf/CategoryScreen";
 import { PackDetailScreen } from "../features/shelf/PackDetailScreen";
 import { ShelfScreen } from "../features/shelf/ShelfScreen";
@@ -47,6 +48,7 @@ export function RootNavigator() {
           <AppStack.Screen name="Shelf" component={ShelfScreen} />
           <AppStack.Screen name="Category" component={CategoryScreen} />
           <AppStack.Screen name="PackDetail" component={PackDetailScreen} />
+          <AppStack.Screen name="Cart" component={CartScreen} />
           <AppStack.Screen name="Wallet" component={WalletScreen} />
         </AppStack.Navigator>
       ) : (

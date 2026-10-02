@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useNavigation, useRoute } from "@react-navigation/native";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import * as Crypto from "expo-crypto";
 import type { RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { useQuery } from "@tanstack/react-query";
 import {
   ActivityIndicator,
   Pressable,
@@ -12,6 +13,7 @@ import {
   View,
 } from "react-native";
 
+import { CartRejected, CartUnknown, submitCart } from "../../api/cart";
 import type { AppStackParamList } from "../../navigation/types";
 import { formatCents } from "../../utils/money";
 import {
@@ -29,8 +31,13 @@ import { useOnline } from "./useOnline";
 export function PackDetailScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<AppStackParamList>>();
   const route = useRoute<RouteProp<AppStackParamList, "PackDetail">>();
+  const queryClient = useQueryClient();
   const online = useOnline();
   const [requested, setRequested] = useState(1);
+  const [reserving, setReserving] = useState(false);
+  const [reserveNotice, setReserveNotice] = useState<string | null>(null);
+  const [reserveUnknown, setReserveUnknown] = useState(false);
+  const reserveKey = useRef<string | null>(null);
   const packs = useQuery({
     queryKey: ["shelf-packs"],
     queryFn: loadShelfPacks,
@@ -42,6 +49,41 @@ export function PackDetailScreen() {
   const pack = packs.data?.find((candidate) => candidate.id === route.params.packId);
   const quantity = pack ? clampQuantity(requested, pack.reservable) : 0;
   const presence = pack ? tierPresence(pack.priceCents) : "quiet";
+
+  function startReserve(remember: boolean) {
+    if (!pack || !online || quantity < 1) {
+      return;
+    }
+    const idempotencyKey = remember || !reserveKey.current ? Crypto.randomUUID() : reserveKey.current;
+    if (remember) {
+      reserveKey.current = idempotencyKey;
+    }
+    setReserving(true);
+    setReserveNotice("Confirming reservation…");
+    void submitCart({
+      action: "reserve",
+      packSkuId: pack.id,
+      quantity,
+      idempotencyKey,
+    }).then((snapshot) => {
+      reserveKey.current = null;
+      setReserveUnknown(false);
+      queryClient.setQueryData(["cart"], snapshot);
+      void queryClient.invalidateQueries({ queryKey: ["shelf-packs"] });
+      navigation.navigate("Cart");
+    }).catch((error: unknown) => {
+      if (error instanceof CartUnknown) {
+        setReserveUnknown(true);
+        setReserveNotice("Confirming reservation…\n\nThis hold may have completed.\nWe're checking before retrying.");
+        return;
+      }
+      reserveKey.current = null;
+      setReserveUnknown(false);
+      setReserveNotice(error instanceof CartRejected ? error.message : "The reservation was rejected.");
+    }).finally(() => {
+      setReserving(false);
+    });
+  }
 
   return (
     <ScrollView contentContainerStyle={styles.content} style={styles.screen}>
@@ -127,7 +169,22 @@ export function PackDetailScreen() {
               <Text style={styles.total}>
                 {quantity} × {formatCents(pack.priceCents)} = {formatCents(pack.priceCents * BigInt(quantity))}
               </Text>
-              <Text style={styles.notice}>Choosing a quantity does not hold these packs.</Text>
+              <Pressable
+                disabled={!online || reserving || reserveUnknown}
+                style={[styles.retry, (!online || reserving || reserveUnknown) && styles.stepDisabled]}
+                onPress={() => startReserve(true)}
+              >
+                <Text style={styles.retryLabel}>{reserving ? "Reserving…" : "Reserve"}</Text>
+              </Pressable>
+              {reserveNotice ? <Text style={styles.notice}>{reserveNotice}</Text> : null}
+              {reserveUnknown ? (
+                <Pressable style={styles.retry} onPress={() => startReserve(false)}>
+                  <Text style={styles.retryLabel}>Check again</Text>
+                </Pressable>
+              ) : null}
+              {!online ? (
+                <Text style={styles.notice}>You're offline. Reservations stay disabled until the connection returns.</Text>
+              ) : null}
             </View>
           )}
         </View>

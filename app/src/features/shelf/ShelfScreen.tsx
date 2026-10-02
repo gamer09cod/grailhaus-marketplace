@@ -49,9 +49,14 @@ export function ShelfScreen() {
     >
       <View style={styles.header}>
         <Text style={styles.brand}>GrailHaus</Text>
-        <Pressable onPress={() => navigation.navigate("Wallet")}>
-          <Text style={styles.link}>Wallet</Text>
-        </Pressable>
+        <View style={styles.headerLinks}>
+          <Pressable onPress={() => navigation.navigate("Cart")}>
+            <Text style={styles.link}>Cart</Text>
+          </Pressable>
+          <Pressable onPress={() => navigation.navigate("Wallet")}>
+            <Text style={styles.link}>Wallet</Text>
+          </Pressable>
+        </View>
       </View>
       <Text style={styles.kicker}>The shelf</Text>
       {!online ? (
@@ -147,6 +152,10 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+  },
+  headerLinks: {
+    flexDirection: "row",
+    gap: 16,
   },
   brand: {
     color: "#f4efe6",
