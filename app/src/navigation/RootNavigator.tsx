@@ -4,14 +4,14 @@ import { ActivityIndicator, StyleSheet, View } from "react-native";
 
 import { useAuth } from "../features/auth/AuthProvider";
 import { AuthScreen } from "../features/auth/AuthScreen";
+import { CategoryScreen } from "../features/shelf/CategoryScreen";
+import { PackDetailScreen } from "../features/shelf/PackDetailScreen";
+import { ShelfScreen } from "../features/shelf/ShelfScreen";
 import { WalletScreen } from "../features/wallet/WalletScreen";
+import type { AppStackParamList } from "./types";
 
 type AuthStackParamList = {
   SignIn: undefined;
-};
-
-type AppStackParamList = {
-  Wallet: undefined;
 };
 
 const AuthStack = createNativeStackNavigator<AuthStackParamList>();
@@ -43,7 +43,10 @@ export function RootNavigator() {
   return (
     <NavigationContainer theme={theme}>
       {session ? (
-        <AppStack.Navigator screenOptions={{ headerShown: false }}>
+        <AppStack.Navigator initialRouteName="Shelf" screenOptions={{ headerShown: false }}>
+          <AppStack.Screen name="Shelf" component={ShelfScreen} />
+          <AppStack.Screen name="Category" component={CategoryScreen} />
+          <AppStack.Screen name="PackDetail" component={PackDetailScreen} />
           <AppStack.Screen name="Wallet" component={WalletScreen} />
         </AppStack.Navigator>
       ) : (

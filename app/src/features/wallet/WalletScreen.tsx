@@ -10,7 +10,11 @@ import {
   View,
 } from "react-native";
 import NetInfo from "@react-native-community/netinfo";
+import { useNavigation } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+
+import type { AppStackParamList } from "../../navigation/types";
 
 import {
   clearInflightDeposit,
@@ -33,6 +37,7 @@ const presets = [
 ] as const;
 
 export function WalletScreen() {
+  const navigation = useNavigation<NativeStackNavigationProp<AppStackParamList>>();
   const { session } = useAuth();
   const userId = session?.user.id ?? "";
   const queryClient = useQueryClient();
@@ -156,9 +161,14 @@ export function WalletScreen() {
     <View style={styles.screen}>
       <View style={styles.header}>
         <Text style={styles.brand}>GrailHaus</Text>
-        <Pressable onPress={() => void supabase.auth.signOut()}>
-          <Text style={styles.signOut}>Sign out</Text>
-        </Pressable>
+        <View style={styles.headerLinks}>
+          <Pressable onPress={() => navigation.navigate("Shelf")}>
+            <Text style={styles.signOut}>Shelf</Text>
+          </Pressable>
+          <Pressable onPress={() => void supabase.auth.signOut()}>
+            <Text style={styles.signOut}>Sign out</Text>
+          </Pressable>
+        </View>
       </View>
       <Text style={styles.label}>Wallet</Text>
       <Text style={styles.balance}>{balanceLabel}</Text>
@@ -230,6 +240,10 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     marginTop: 24,
+  },
+  headerLinks: {
+    flexDirection: "row",
+    gap: 16,
   },
   brand: {
     color: "#f4efe6",
