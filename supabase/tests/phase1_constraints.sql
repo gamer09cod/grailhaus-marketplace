@@ -464,16 +464,23 @@ declare
   buyer_id uuid;
   sku_id uuid;
   cart_id uuid;
+  oversell_cart uuid;
   line_id uuid;
 begin
   select id into buyer_id from test_ids where label = 'buyer';
   select id into sku_id from test_ids where label = 'sku';
   select id into cart_id from test_ids where label = 'cart';
 
+  -- The open cart already has this pack. A second open line for the same
+  -- SKU is rejected, so the oversell attempt uses another cart.
+  insert into public.carts (user_id, status)
+  values (buyer_id, 'CHECKED_OUT')
+  returning id into oversell_cart;
+
   insert into public.cart_lines (
     id, cart_id, line_type, pack_sku_id, quantity, snapshot_price_cents
   ) values (
-    gen_random_uuid(), cart_id, 'PACK', sku_id, 3, 1000
+    gen_random_uuid(), oversell_cart, 'PACK', sku_id, 3, 1000
   )
   returning id into line_id;
 
@@ -571,6 +578,10 @@ begin
   select id into buyer_id from test_ids where label = 'buyer';
   select id into sku_id from test_ids where label = 'sku';
   select id into cart_id from test_ids where label = 'cart';
+
+  update public.cart_lines as existing_line
+  set removed_at = now()
+  where existing_line.id = (select id from test_ids where label = 'line');
 
   insert into public.cart_lines (
     id, cart_id, line_type, pack_sku_id, quantity, snapshot_price_cents

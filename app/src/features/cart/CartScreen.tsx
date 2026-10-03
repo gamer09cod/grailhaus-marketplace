@@ -22,6 +22,7 @@ import {
   type CartLine,
   type CartSnapshot,
 } from "../../api/cart";
+import { CheckoutRejected, CheckoutUnknown, submitCheckout } from "../../api/checkout";
 import { supabase } from "../../api/supabase";
 import type { AppStackParamList } from "../../navigation/types";
 import { formatCents } from "../../utils/money";
@@ -37,7 +38,10 @@ export function CartScreen() {
   const [notice, setNotice] = useState<string | null>(null);
   const [pendingLineId, setPendingLineId] = useState<string | null>(null);
   const [awaitingResult, setAwaitingResult] = useState(false);
+  const [paying, setPaying] = useState(false);
+  const [awaitingPayment, setAwaitingPayment] = useState(false);
   const inflight = useRef<LineCartAction | null>(null);
+  const payment = useRef<PaymentRequest | null>(null);
   const cart = useQuery({
     queryKey: ["cart"],
     queryFn: loadCart,
@@ -126,10 +130,65 @@ export function CartScreen() {
   }
 
   function startLineAction(line: CartLine, action: "release" | "retry" | "acceptPrice") {
+    if (paying || awaitingPayment) {
+      return;
+    }
     void runLineAction({
       action,
       cartLineId: line.lineId,
       idempotencyKey: Crypto.randomUUID(),
+    }, true);
+  }
+
+  async function runPayment(request: PaymentRequest, remember: boolean) {
+    if (!online || (paying && remember)) {
+      return;
+    }
+    if (remember) {
+      payment.current = request;
+    }
+    setPaying(true);
+    setNotice("Confirming purchase…");
+    try {
+      const receipt = await submitCheckout(request);
+      payment.current = null;
+      setAwaitingPayment(false);
+      const packs = receipt.packCount === 1 ? "1 pack is sealed." : `${receipt.packCount} packs are sealed.`;
+      setNotice(`Paid ${formatCents(receipt.totalCents)}.\nBalance ${formatCents(receipt.balanceCents)}.\n${packs}`);
+      void queryClient.invalidateQueries({ queryKey: ["cart"] });
+      void queryClient.invalidateQueries({ queryKey: ["wallet"] });
+      void queryClient.invalidateQueries({ queryKey: ["shelf-packs"] });
+    } catch (error) {
+      if (error instanceof CheckoutUnknown) {
+        setAwaitingPayment(true);
+        setNotice("Confirming purchase…\n\nYour order may have completed.\nWe're checking before retrying.");
+        return;
+      }
+      payment.current = null;
+      setAwaitingPayment(false);
+      setNotice(error instanceof CheckoutRejected ? error.message : "The payment was rejected.");
+      void queryClient.invalidateQueries({ queryKey: ["cart"] });
+      void queryClient.invalidateQueries({ queryKey: ["shelf-packs"] });
+    } finally {
+      setPaying(false);
+    }
+  }
+
+  function startPayment() {
+    const snapshot = cart.data;
+    const total = snapshot ? payableTotal(snapshot.lines) : null;
+    if (!snapshot?.cartId || total === null) {
+      return;
+    }
+    void runPayment({
+      cartId: snapshot.cartId,
+      idempotencyKey: Crypto.randomUUID(),
+      expectedTotalCents: total,
+      lines: snapshot.lines.map((line) => ({
+        lineId: line.lineId,
+        quantity: line.quantity,
+        snapshotPriceCents: line.snapshotPriceCents,
+      })),
     }, true);
   }
 
@@ -183,6 +242,30 @@ export function CartScreen() {
           <Text style={styles.primaryLabel}>Check again</Text>
         </Pressable>
       ) : null}
+      {awaitingPayment ? (
+        <Pressable
+          style={styles.primary}
+          onPress={() => {
+            const request = payment.current;
+            if (request) {
+              void runPayment(request, false);
+            }
+          }}
+        >
+          <Text style={styles.primaryLabel}>Check again</Text>
+        </Pressable>
+      ) : null}
+      {cart.data && payableTotal(cart.data.lines) !== null ? (
+        <Pressable
+          disabled={!online || paying || pendingLineId !== null || awaitingPayment}
+          style={[styles.primary, (!online || paying || pendingLineId !== null || awaitingPayment) && styles.disabled]}
+          onPress={startPayment}
+        >
+          <Text style={styles.primaryLabel}>
+            {paying ? "Confirming purchase…" : `Pay ${formatCents(payableTotal(cart.data.lines) ?? 0n)}`}
+          </Text>
+        </Pressable>
+      ) : null}
       {cart.data?.lines.map((line) => (
         <CartLineCard
           key={line.lineId}
@@ -190,7 +273,7 @@ export function CartScreen() {
           snapshot={cart.data}
           nowMs={nowMs}
           busy={pendingLineId === line.lineId}
-          disabled={!online || pendingLineId !== null}
+          disabled={!online || pendingLineId !== null || paying || awaitingPayment}
           onAccept={() => startLineAction(line, "acceptPrice")}
           onRemove={() => startLineAction(line, "release")}
           onRetry={() => startLineAction(line, "retry")}
@@ -273,6 +356,27 @@ type LineCartAction = {
   cartLineId: string;
   idempotencyKey: string;
 };
+
+type PaymentRequest = {
+  cartId: string;
+  idempotencyKey: string;
+  expectedTotalCents: bigint;
+  lines: { lineId: string; quantity: number; snapshotPriceCents: bigint }[];
+};
+
+function payableTotal(lines: CartLine[]): bigint | null {
+  if (lines.length === 0) {
+    return null;
+  }
+  let total = 0n;
+  for (const line of lines) {
+    if (line.state !== "VALID" || line.snapshotPriceCents !== line.currentPriceCents) {
+      return null;
+    }
+    total += line.snapshotPriceCents * BigInt(line.quantity);
+  }
+  return total;
+}
 
 function messageFor(error: unknown): string {
   if (error instanceof CartUnknown) {
