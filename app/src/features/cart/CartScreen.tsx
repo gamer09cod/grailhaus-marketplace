@@ -72,6 +72,9 @@ export function CartScreen() {
       .on("postgres_changes", { event: "*", schema: "public", table: "cart_reservations" }, () => {
         refreshCart();
       })
+      .on("postgres_changes", { event: "*", schema: "public", table: "marketplace_listings" }, () => {
+        refreshCart();
+      })
       .subscribe();
     return () => {
       appState.remove();
@@ -107,7 +110,7 @@ export function CartScreen() {
       inflight.current = action;
     }
     setPendingLineId(action.cartLineId);
-    setNotice(action.action === "release" ? "Removing this pack…" : "Confirming reservation…");
+    setNotice(action.action === "release" ? "Removing this item…" : "Confirming reservation…");
     try {
       const snapshot = await submitCart(action);
       inflight.current = null;
@@ -129,7 +132,7 @@ export function CartScreen() {
     }
   }
 
-  function startLineAction(line: CartLine, action: "release" | "retry" | "acceptPrice") {
+  function startLineAction(line: CartLine, action: "release" | "retry" | "acceptPrice" | "acceptListingPrice") {
     if (paying || awaitingPayment) {
       return;
     }
@@ -153,11 +156,19 @@ export function CartScreen() {
       const receipt = await submitCheckout(request);
       payment.current = null;
       setAwaitingPayment(false);
-      const packs = receipt.packCount === 1 ? "1 pack is sealed." : `${receipt.packCount} packs are sealed.`;
-      setNotice(`Paid ${formatCents(receipt.totalCents)}.\nBalance ${formatCents(receipt.balanceCents)}.\n${packs}`);
+      const parts: string[] = [];
+      if (receipt.packCount > 0) {
+        parts.push(receipt.packCount === 1 ? "1 pack is sealed." : `${receipt.packCount} packs are sealed.`);
+      }
+      if (receipt.listingCount > 0) {
+        parts.push(receipt.listingCount === 1 ? "1 listing is now yours." : `${receipt.listingCount} listings are now yours.`);
+      }
+      setNotice(`Paid ${formatCents(receipt.totalCents)}.\nBalance ${formatCents(receipt.balanceCents)}.${parts.length ? `\n${parts.join(" ")}` : ""}`);
       void queryClient.invalidateQueries({ queryKey: ["cart"] });
       void queryClient.invalidateQueries({ queryKey: ["wallet"] });
       void queryClient.invalidateQueries({ queryKey: ["shelf-packs"] });
+      void queryClient.invalidateQueries({ queryKey: ["market"] });
+      void queryClient.invalidateQueries({ queryKey: ["holdings"] });
     } catch (error) {
       if (error instanceof CheckoutUnknown) {
         setAwaitingPayment(true);
@@ -274,7 +285,7 @@ export function CartScreen() {
           nowMs={nowMs}
           busy={pendingLineId === line.lineId}
           disabled={!online || pendingLineId !== null || paying || awaitingPayment}
-          onAccept={() => startLineAction(line, "acceptPrice")}
+          onAccept={() => startLineAction(line, line.lineType === "PACK" ? "acceptPrice" : "acceptListingPrice")}
           onRemove={() => startLineAction(line, "release")}
           onRetry={() => startLineAction(line, "retry")}
         />
@@ -302,6 +313,32 @@ function CartLineCard({
   onRemove: () => void;
   onRetry: () => void;
 }) {
+  if (line.lineType === "MARKETPLACE_LISTING") {
+    return (
+      <View style={styles.card}>
+        <Text style={styles.category}>{categoryLabel(line.category)}</Text>
+        <Text style={styles.name}>{line.name}</Text>
+        <Text style={styles.meta}>Seller {line.sellerUsername}</Text>
+        <Text style={styles.meta}>Shown price {formatCents(line.snapshotPriceCents)}</Text>
+        <Text style={styles.meta}>Current price {formatCents(line.currentPriceCents)}</Text>
+        <Text style={styles.meta}>{availabilityLabel(line.availability)}</Text>
+        {line.state === "LISTING_PRICE_CHANGED" ? (
+          <View>
+            <Text style={styles.warning}>Seller changed the price.</Text>
+            <Text style={styles.meta}>Previous price: {formatCents(line.snapshotPriceCents)}</Text>
+            <Text style={styles.meta}>Current price: {formatCents(line.currentPriceCents)}</Text>
+            <ActionButton disabled={disabled} label={busy ? "Confirming…" : "Accept New Price"} onPress={onAccept} />
+          </View>
+        ) : null}
+        {line.state === "LISTING_SOLD" ? <Text style={styles.warning}>This listing has been sold.</Text> : null}
+        {line.state === "LISTING_DELISTED" ? <Text style={styles.warning}>The seller removed this listing.</Text> : null}
+        <Pressable disabled={disabled} onPress={onRemove}>
+          <Text style={[styles.remove, disabled && styles.disabled]}>{busy ? "Removing…" : "Remove"}</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
   const countdown = line.expiresAt
     ? remainingLabel(line.expiresAt, snapshot.serverNow, snapshot.fetchedAtMs, nowMs)
     : null;
@@ -351,8 +388,18 @@ function ActionButton({ label, onPress, disabled }: { label: string; onPress: ()
   );
 }
 
+function availabilityLabel(availability: "AVAILABLE" | "SOLD" | "DELISTED"): string {
+  if (availability === "AVAILABLE") {
+    return "Available";
+  }
+  if (availability === "SOLD") {
+    return "Sold";
+  }
+  return "Not available";
+}
+
 type LineCartAction = {
-  action: "release" | "retry" | "acceptPrice";
+  action: "release" | "retry" | "acceptPrice" | "acceptListingPrice";
   cartLineId: string;
   idempotencyKey: string;
 };

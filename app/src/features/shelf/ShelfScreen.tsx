@@ -50,6 +50,9 @@ export function ShelfScreen() {
       <View style={styles.header}>
         <Text style={styles.brand}>GrailHaus</Text>
         <View style={styles.headerLinks}>
+          <Pressable onPress={() => navigation.navigate("Market")}>
+            <Text style={styles.link}>Market</Text>
+          </Pressable>
           <Pressable onPress={() => navigation.navigate("Collection")}>
             <Text style={styles.link}>Collection</Text>
           </Pressable>

@@ -91,6 +91,7 @@ function parseAction(body: unknown):
     action?: unknown;
     packSkuId?: unknown;
     cartLineId?: unknown;
+    listingId?: unknown;
     quantity?: unknown;
     idempotencyKey?: unknown;
   };
@@ -102,6 +103,20 @@ function parseAction(body: unknown):
   const key = readKey(record.idempotencyKey);
   if (!key.ok) {
     return key;
+  }
+
+  if (record.action === "addListing") {
+    if (typeof record.listingId !== "string" || !uuidPattern.test(record.listingId)) {
+      return { ok: false, error: invalid("Choose a listing.") };
+    }
+    return {
+      ok: true,
+      rpc: "add_listing",
+      args: {
+        p_listing_id: record.listingId,
+        p_idempotency_key: key.value,
+      },
+    };
   }
 
   if (record.action === "reserve") {
@@ -136,6 +151,9 @@ function parseAction(body: unknown):
   }
   if (record.action === "acceptPrice") {
     return { ok: true, rpc: "accept_pack_price", args: lineArgs };
+  }
+  if (record.action === "acceptListingPrice") {
+    return { ok: true, rpc: "accept_listing_price", args: lineArgs };
   }
 
   return { ok: false, error: invalid("That cart action is not available.") };

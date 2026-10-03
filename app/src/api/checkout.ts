@@ -15,6 +15,7 @@ export type CheckoutReceipt = {
   balanceCents: bigint;
   idempotencyKey: string;
   packCount: number;
+  listingCount: number;
 };
 
 export class CheckoutRejected extends Error {
@@ -91,6 +92,7 @@ export async function submitCheckout(input: {
     balanceCents: centsFromWire(payload.balanceCents),
     idempotencyKey: payload.idempotencyKey,
     packCount: payload.packs.length,
+    listingCount: Array.isArray(payload.listings) ? payload.listings.length : 0,
   };
 }
 
@@ -109,6 +111,7 @@ function isReceipt(value: unknown): value is {
   balanceCents: unknown;
   idempotencyKey: string;
   packs: unknown[];
+  listings?: unknown;
 } {
   if (typeof value !== "object" || value === null) {
     return false;

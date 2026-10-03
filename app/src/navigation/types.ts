@@ -9,4 +9,5 @@ export type AppStackParamList = {
   Wallet: undefined;
   Collection: undefined;
   Listing: { ownedItemId: string };
+  Market: undefined;
 };

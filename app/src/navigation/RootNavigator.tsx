@@ -8,6 +8,7 @@ import { CartScreen } from "../features/cart/CartScreen";
 import { CollectionScreen } from "../features/collection/CollectionScreen";
 import { ListingScreen } from "../features/collection/ListingScreen";
 import { DropsScreen } from "../features/drops/DropsScreen";
+import { MarketScreen } from "../features/market/MarketScreen";
 import { CategoryScreen } from "../features/shelf/CategoryScreen";
 import { PackDetailScreen } from "../features/shelf/PackDetailScreen";
 import { ShelfScreen } from "../features/shelf/ShelfScreen";
@@ -54,6 +55,7 @@ export function RootNavigator() {
           <AppStack.Screen name="PackDetail" component={PackDetailScreen} />
           <AppStack.Screen name="Cart" component={CartScreen} />
           <AppStack.Screen name="Wallet" component={WalletScreen} />
+          <AppStack.Screen name="Market" component={MarketScreen} />
           <AppStack.Screen name="Collection" component={CollectionScreen} />
           <AppStack.Screen name="Listing" component={ListingScreen} />
         </AppStack.Navigator>

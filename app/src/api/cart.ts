@@ -4,14 +4,20 @@ import { centsFromWire } from "../utils/money";
 import { isPackCategory } from "../features/shelf/packs";
 import type { PackCategory } from "../navigation/types";
 
-export type CartLineState =
+export type PackLineState =
   | "VALID"
   | "EXPIRED"
   | "PARTIALLY_AVAILABLE"
   | "SOLD_OUT"
   | "PRICE_CHANGED";
 
-export type CartLine = {
+export type ListingLineState =
+  | "VALID"
+  | "LISTING_PRICE_CHANGED"
+  | "LISTING_SOLD"
+  | "LISTING_DELISTED";
+
+export type PackCartLine = {
   lineId: string;
   lineType: "PACK";
   packSkuId: string;
@@ -23,8 +29,25 @@ export type CartLine = {
   currentPriceCents: bigint;
   availableQuantity: bigint;
   expiresAt: string | null;
-  state: CartLineState;
+  state: PackLineState;
 };
+
+export type ListingCartLine = {
+  lineId: string;
+  lineType: "MARKETPLACE_LISTING";
+  listingId: string;
+  name: string;
+  category: PackCategory;
+  quantity: number;
+  snapshotPriceCents: bigint;
+  currentPriceCents: bigint;
+  sellerUsername: string;
+  availability: "AVAILABLE" | "SOLD" | "DELISTED";
+  expiresAt: null;
+  state: ListingLineState;
+};
+
+export type CartLine = PackCartLine | ListingCartLine;
 
 export type CartSnapshot = {
   cartId: string | null;
@@ -52,7 +75,8 @@ export class CartUnknown extends Error {
 type CartAction =
   | { action: "view" }
   | { action: "reserve"; packSkuId: string; quantity: number; idempotencyKey: string }
-  | { action: "release" | "retry" | "acceptPrice"; cartLineId: string; idempotencyKey: string };
+  | { action: "addListing"; listingId: string; idempotencyKey: string }
+  | { action: "release" | "retry" | "acceptPrice" | "acceptListingPrice"; cartLineId: string; idempotencyKey: string };
 
 export async function loadCart(): Promise<CartSnapshot> {
   return submitCart({ action: "view" });
@@ -109,23 +133,11 @@ function parseSnapshot(payload: {
 
   const lines: CartLine[] = [];
   for (const entry of payload.lines) {
-    if (!isLine(entry)) {
+    const line = parseLine(entry);
+    if (!line) {
       throw new CartUnknown();
     }
-    lines.push({
-      lineId: entry.lineId,
-      lineType: "PACK",
-      packSkuId: entry.packSkuId,
-      name: entry.name,
-      tier: entry.tier,
-      category: entry.category,
-      quantity: entry.quantity,
-      snapshotPriceCents: centsFromWire(entry.snapshotPriceCents),
-      currentPriceCents: centsFromWire(entry.currentPriceCents),
-      availableQuantity: centsFromWire(entry.availableQuantity),
-      expiresAt: entry.expiresAt,
-      state: entry.state,
-    });
+    lines.push(line);
   }
 
   return {
@@ -140,25 +152,15 @@ function isSnapshot(value: unknown): value is { cartId: unknown; serverNow: unkn
   return typeof value === "object" && value !== null && "lines" in value && "serverNow" in value;
 }
 
-function isLine(value: unknown): value is {
-  lineId: string;
-  packSkuId: string;
-  name: string;
-  tier: string;
-  category: PackCategory;
-  quantity: number;
-  snapshotPriceCents: unknown;
-  currentPriceCents: unknown;
-  availableQuantity: unknown;
-  expiresAt: string | null;
-  state: CartLineState;
-} {
+function parseLine(value: unknown): CartLine | null {
   if (typeof value !== "object" || value === null) {
-    return false;
+    return null;
   }
   const record = value as {
     lineId?: unknown;
+    lineType?: unknown;
     packSkuId?: unknown;
+    listingId?: unknown;
     name?: unknown;
     tier?: unknown;
     category?: unknown;
@@ -168,22 +170,62 @@ function isLine(value: unknown): value is {
     snapshotPriceCents?: unknown;
     currentPriceCents?: unknown;
     availableQuantity?: unknown;
+    sellerUsername?: unknown;
+    availability?: unknown;
   };
-  return typeof record.lineId === "string"
-    && typeof record.packSkuId === "string"
-    && typeof record.name === "string"
-    && typeof record.tier === "string"
-    && typeof record.category === "string"
-    && isPackCategory(record.category)
-    && isCartState(record.state)
-    && typeof record.quantity === "number"
-    && (record.expiresAt === null || typeof record.expiresAt === "string")
-    && record.snapshotPriceCents !== undefined
-    && record.currentPriceCents !== undefined
-    && record.availableQuantity !== undefined;
+  if (typeof record.lineId !== "string" || typeof record.name !== "string" || typeof record.category !== "string" || !isPackCategory(record.category) || typeof record.quantity !== "number") {
+    return null;
+  }
+  if (record.lineType === "MARKETPLACE_LISTING") {
+    if (typeof record.listingId !== "string" || typeof record.sellerUsername !== "string" || !isListingState(record.state) || !isAvailability(record.availability)) {
+      return null;
+    }
+    return {
+      lineId: record.lineId,
+      lineType: "MARKETPLACE_LISTING",
+      listingId: record.listingId,
+      name: record.name,
+      category: record.category,
+      quantity: record.quantity,
+      snapshotPriceCents: centsFromWire(record.snapshotPriceCents),
+      currentPriceCents: centsFromWire(record.currentPriceCents),
+      sellerUsername: record.sellerUsername,
+      availability: record.availability,
+      expiresAt: null,
+      state: record.state,
+    };
+  }
+  if (typeof record.packSkuId !== "string" || typeof record.tier !== "string" || !isPackState(record.state) || (record.expiresAt !== null && typeof record.expiresAt !== "string")) {
+    return null;
+  }
+  return {
+    lineId: record.lineId,
+    lineType: "PACK",
+    packSkuId: record.packSkuId,
+    name: record.name,
+    tier: record.tier,
+    category: record.category,
+    quantity: record.quantity,
+    snapshotPriceCents: centsFromWire(record.snapshotPriceCents),
+    currentPriceCents: centsFromWire(record.currentPriceCents),
+    availableQuantity: centsFromWire(record.availableQuantity),
+    expiresAt: record.expiresAt,
+    state: record.state,
+  };
 }
 
-function isCartState(value: unknown): value is CartLineState {
+function isAvailability(value: unknown): value is ListingCartLine["availability"] {
+  return value === "AVAILABLE" || value === "SOLD" || value === "DELISTED";
+}
+
+function isListingState(value: unknown): value is ListingLineState {
+  return value === "VALID"
+    || value === "LISTING_PRICE_CHANGED"
+    || value === "LISTING_SOLD"
+    || value === "LISTING_DELISTED";
+}
+
+function isPackState(value: unknown): value is PackLineState {
   return value === "VALID"
     || value === "EXPIRED"
     || value === "PARTIALLY_AVAILABLE"
