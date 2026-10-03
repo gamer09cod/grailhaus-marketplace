@@ -5,6 +5,9 @@ import { ActivityIndicator, StyleSheet, View } from "react-native";
 import { useAuth } from "../features/auth/AuthProvider";
 import { AuthScreen } from "../features/auth/AuthScreen";
 import { CartScreen } from "../features/cart/CartScreen";
+import { CollectionScreen } from "../features/collection/CollectionScreen";
+import { ListingScreen } from "../features/collection/ListingScreen";
+import { DropsScreen } from "../features/drops/DropsScreen";
 import { CategoryScreen } from "../features/shelf/CategoryScreen";
 import { PackDetailScreen } from "../features/shelf/PackDetailScreen";
 import { ShelfScreen } from "../features/shelf/ShelfScreen";
@@ -46,10 +49,13 @@ export function RootNavigator() {
       {session ? (
         <AppStack.Navigator initialRouteName="Shelf" screenOptions={{ headerShown: false }}>
           <AppStack.Screen name="Shelf" component={ShelfScreen} />
+          <AppStack.Screen name="Drops" component={DropsScreen} />
           <AppStack.Screen name="Category" component={CategoryScreen} />
           <AppStack.Screen name="PackDetail" component={PackDetailScreen} />
           <AppStack.Screen name="Cart" component={CartScreen} />
           <AppStack.Screen name="Wallet" component={WalletScreen} />
+          <AppStack.Screen name="Collection" component={CollectionScreen} />
+          <AppStack.Screen name="Listing" component={ListingScreen} />
         </AppStack.Navigator>
       ) : (
         <AuthStack.Navigator screenOptions={{ headerShown: false }}>

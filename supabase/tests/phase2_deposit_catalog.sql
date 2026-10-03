@@ -13,7 +13,10 @@ declare
 begin
   foreach category_name in array array['TRADING_CARD', 'SNEAKER', 'WATCH'] loop
     select count(*) into item_count from public.catalog_items where category = category_name;
-    select count(*) into tier_count from public.pack_skus where category = category_name;
+    select count(*) into tier_count
+    from public.pack_skus
+    where category = category_name
+      and is_drop = false;
 
     if item_count < 20 or item_count > 30 then
       raise exception 'catalog count for % is %', category_name, item_count;
@@ -152,7 +155,7 @@ begin
   select count(*) into visible_items from public.catalog_items;
   select count(*) into visible_packs from public.pack_skus;
 
-  if visible_items <> 81 or visible_packs <> 9 then
+  if visible_items <> 81 or visible_packs <> 10 then
     raise exception 'catalog load saw % items and % packs', visible_items, visible_packs;
   end if;
 

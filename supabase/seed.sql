@@ -115,7 +115,8 @@ insert into public.pack_skus (
   ('SNEAKER', 'Vault Pack', 'Vault', 80000, 500, 500, 0, false, true),
   ('WATCH', 'Entry Vault', 'Entry Vault', 50000, 500, 500, 0, false, true),
   ('WATCH', 'Luxury Box', 'Luxury', 200000, 500, 500, 0, false, true),
-  ('WATCH', 'Grail Box', 'Grail', 800000, 500, 500, 0, false, true);
+  ('WATCH', 'Grail Box', 'Grail', 800000, 500, 500, 0, false, true),
+  ('TRADING_CARD', 'Midnight Drop', 'Midnight', 2500, 40, 40, 0, true, true);
 
 -- Odds and pools commit together. The coverage trigger is deferred, so a
 -- rarity cannot be published without an item of that rarity in the pool.
@@ -125,6 +126,7 @@ declare
     array['TRADING_CARD', 'Starter', 'Harbor Fox', 'Glass Minnow', 'Paper Lantern', 'Cedar Finch', 'Copper Relay', 'Night Market', 'Velvet Rook', 'Silver Orchard', 'Eclipse Wyrm'],
     array['TRADING_CARD', 'Collector', 'Marble Saint', 'Red Circuit', 'Hollow Choir', 'Brass Compass', 'Ivory Duelist', 'Storm Archive', 'Gilded Kraken', 'Obsidian Saint', 'Crown of Cinders'],
     array['TRADING_CARD', 'Legendary', 'Royal Courier', 'Pale Astronomer', 'Thorn Regent', 'Mirror Bishop', 'Sapphire Duel', 'Gold Reliquary', 'Eclipse Dragon', 'Void Empress', 'First Sovereign'],
+    array['TRADING_CARD', 'Midnight', 'Harbor Fox', 'Glass Minnow', 'Paper Lantern', 'Cedar Finch', 'Copper Relay', 'Night Market', 'Velvet Rook', 'Silver Orchard', 'Eclipse Wyrm'],
     array['SNEAKER', 'Street', 'Nike Dunk Low Panda', 'Adidas Samba OG', 'New Balance 550 White', 'Nike Air Force 1', 'Jordan 1 Mid Chicago', 'Nike Dunk Low Jackie Robinson', 'Jordan 4 Military Black', 'Nike Dunk Low Travis Scott', 'Jordan 1 High Lost and Found'],
     array['SNEAKER', 'Rare', 'Nike Dunk Low Polar Blue', 'New Balance 2002R Protection Pack', 'Adidas Forum Low', 'Jordan 3 White Cement', 'Nike SB Dunk Low StrangeLove', 'Jordan 4 Bred Reimagined', 'Nike Dunk Low Ben and Jerrys', 'Jordan 1 High Travis Scott', 'Nike SB Dunk Low Staple Pigeon'],
     array['SNEAKER', 'Vault', 'Jordan 4 Union Guava', 'Nike Dunk Low Off-White Lot 1', 'Adidas Yeezy Boost 350 Beluga', 'Jordan 1 High Fragment', 'Nike Dunk Low Off-White University Red', 'Jordan 4 Off-White Sail', 'Jordan 11 Concord', 'Nike Dunk Low Off-White Michigan', 'Jordan 1 High Off-White Chicago'],
@@ -153,7 +155,7 @@ begin
       raise exception 'missing pack sku % %', tier_row[1], tier_row[2];
     end if;
 
-    if tier_row[2] in ('Starter', 'Street', 'Entry Vault') then
+    if tier_row[2] in ('Starter', 'Street', 'Entry Vault', 'Midnight') then
       chosen := low_odds;
     elsif tier_row[2] in ('Collector', 'Rare', 'Luxury') then
       chosen := mid_odds;
@@ -229,7 +231,8 @@ begin
 
     select count(*) into tier_count
     from public.pack_skus
-    where category = category_name;
+    where category = category_name
+      and is_drop = false;
 
     if item_count < 20 or item_count > 30 then
       raise exception 'seed catalog count for % is %', category_name, item_count;
@@ -239,6 +242,26 @@ begin
       raise exception 'seed tier count for % is %', category_name, tier_count;
     end if;
   end loop;
+
+  update public.pack_skus
+  set max_per_user = 10
+  where category = 'TRADING_CARD'
+    and tier = 'Midnight';
+
+  insert into public.drops (pack_sku_id, starts_at, ends_at, initial_stock)
+  select id, now() - interval '1 hour', now() + interval '30 days', stock_total
+  from public.pack_skus
+  where category = 'TRADING_CARD'
+    and tier = 'Midnight';
+
+  if (
+    select derived.status
+    from public.drops_with_status derived
+    join public.pack_skus sku on sku.id = derived.pack_sku_id
+    where sku.tier = 'Midnight'
+  ) is distinct from 'LIVE' then
+    raise exception 'seed drop is not live';
+  end if;
 
   if exists (
     select 1

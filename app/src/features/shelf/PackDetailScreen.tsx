@@ -1,11 +1,12 @@
-import { useRef, useState } from "react";
-import { useNavigation, useRoute } from "@react-navigation/native";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useFocusEffect, useNavigation, useRoute } from "@react-navigation/native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Crypto from "expo-crypto";
 import type { RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import {
   ActivityIndicator,
+  AppState,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -14,8 +15,12 @@ import {
 } from "react-native";
 
 import { CartRejected, CartUnknown, submitCart } from "../../api/cart";
+import { supabase } from "../../api/supabase";
 import type { AppStackParamList } from "../../navigation/types";
 import { formatCents } from "../../utils/money";
+import { secondsUntil } from "../cart/countdown";
+import { loadDropBoard, type TimedDrop } from "../drops/board";
+import { DropStatusText } from "../drops/DropsScreen";
 import {
   categoryLabel,
   clampQuantity,
@@ -38,20 +43,97 @@ export function PackDetailScreen() {
   const [reserveNotice, setReserveNotice] = useState<string | null>(null);
   const [reserveUnknown, setReserveUnknown] = useState(false);
   const reserveKey = useRef<string | null>(null);
+  const boundaryKey = useRef<string | null>(null);
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const packs = useQuery({
     queryKey: ["shelf-packs"],
     queryFn: loadShelfPacks,
+  });
+  const drops = useQuery({
+    queryKey: ["drop-board"],
+    queryFn: loadDropBoard,
   });
   const odds = useQuery({
     queryKey: ["pack-odds", route.params.packId],
     queryFn: () => loadPackOdds(route.params.packId),
   });
-  const pack = packs.data?.find((candidate) => candidate.id === route.params.packId);
-  const quantity = pack ? clampQuantity(requested, pack.reservable) : 0;
+  const shelfPack = packs.data?.find((candidate) => candidate.id === route.params.packId);
+  const drop = drops.data?.drops.find((candidate) => candidate.packSkuId === route.params.packId);
+  const pack = shelfPack
+    ? { ...shelfPack, maxPerUser: null as number | null, drop: null as TimedDrop | null }
+    : drop
+      ? {
+          id: drop.packSkuId,
+          category: drop.category,
+          name: drop.name,
+          tier: drop.tier,
+          priceCents: drop.priceCents,
+          reservable: drop.reservable,
+          maxPerUser: drop.maxPerUser,
+          drop,
+        }
+      : undefined;
+  const selectionCap = pack ? reserveCap(pack.reservable, pack.maxPerUser) : 0n;
+  const quantity = pack ? clampQuantity(requested, selectionCap) : 0;
   const presence = pack ? tierPresence(pack.priceCents) : "quiet";
+  const dropOpen = !pack?.drop || pack.drop.status === "LIVE";
+  const loading = (packs.isLoading || drops.isLoading) && !pack;
+  const failed = !pack && packs.isError && drops.isError;
+
+  const refreshDrops = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ["drop-board"] });
+  }, [queryClient]);
+
+  useFocusEffect(
+    useCallback(() => {
+      refreshDrops();
+    }, [refreshDrops]),
+  );
+
+  useEffect(() => {
+    const appState = AppState.addEventListener("change", (next) => {
+      if (next === "active") {
+        refreshDrops();
+      }
+    });
+    const channel = supabase
+      .channel(`drop-detail-${route.params.packId}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "pack_skus" }, () => {
+        refreshDrops();
+        void queryClient.invalidateQueries({ queryKey: ["shelf-packs"] });
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "drops" }, () => {
+        refreshDrops();
+      })
+      .subscribe();
+    return () => {
+      appState.remove();
+      void supabase.removeChannel(channel);
+    };
+  }, [queryClient, refreshDrops, route.params.packId]);
+
+  useEffect(() => {
+    if (!drop || !drops.data) {
+      return;
+    }
+    const timer = setInterval(() => {
+      const nextNow = Date.now();
+      setNowMs(nextNow);
+      const target = drop.status === "UPCOMING" ? drop.startsAt : drop.status === "LIVE" ? drop.endsAt : null;
+      if (
+        target
+        && secondsUntil(target, drops.data.serverNow, drops.data.fetchedAtMs, nextNow) === 0
+        && boundaryKey.current !== drops.data.serverNow
+      ) {
+        boundaryKey.current = drops.data.serverNow;
+        refreshDrops();
+      }
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [drop, drops.data, refreshDrops]);
 
   function startReserve(remember: boolean) {
-    if (!pack || !online || quantity < 1) {
+    if (!pack || !online || !dropOpen || quantity < 1) {
       return;
     }
     const idempotencyKey = remember || !reserveKey.current ? Crypto.randomUUID() : reserveKey.current;
@@ -70,6 +152,7 @@ export function PackDetailScreen() {
       setReserveUnknown(false);
       queryClient.setQueryData(["cart"], snapshot);
       void queryClient.invalidateQueries({ queryKey: ["shelf-packs"] });
+      void queryClient.invalidateQueries({ queryKey: ["drop-board"] });
       navigation.navigate("Cart");
     }).catch((error: unknown) => {
       if (error instanceof CartUnknown) {
@@ -94,23 +177,26 @@ export function PackDetailScreen() {
         <Text style={styles.notice}>You're offline. Price and availability may be out of date.</Text>
       ) : null}
 
-      {packs.isLoading ? (
+      {loading ? (
         <View style={styles.status}>
           <ActivityIndicator color="#e4c07a" />
           <Text style={styles.notice}>Loading this pack…</Text>
         </View>
       ) : null}
 
-      {packs.isError ? (
+      {failed ? (
         <View style={styles.status}>
           <Text style={styles.notice}>This pack didn't load. Check the connection and try again.</Text>
-          <Pressable style={styles.retry} onPress={() => void packs.refetch()}>
+          <Pressable style={styles.retry} onPress={() => {
+            void packs.refetch();
+            void drops.refetch();
+          }}>
             <Text style={styles.retryLabel}>Try again</Text>
           </Pressable>
         </View>
       ) : null}
 
-      {packs.data && !pack ? (
+      {packs.data && drops.data && !pack ? (
         <Text style={styles.notice}>This pack is not on the shelf.</Text>
       ) : null}
 
@@ -122,7 +208,14 @@ export function PackDetailScreen() {
           <Text style={[styles.price, presence === "grail" ? styles.priceGrail : null, presence === "quiet" ? styles.priceQuiet : null]}>
             {formatCents(pack.priceCents)}
           </Text>
-          <Text style={styles.availability}>{stockLabel(pack.reservable)}</Text>
+          {pack.drop && drops.data ? (
+            <DropStatusText board={drops.data} drop={pack.drop} nowMs={nowMs} />
+          ) : (
+            <Text style={styles.availability}>{stockLabel(pack.reservable)}</Text>
+          )}
+          {pack.maxPerUser ? (
+            <Text style={styles.notice}>Maximum {pack.maxPerUser} packs per user</Text>
+          ) : null}
 
           <Text style={styles.section}>Rarity odds</Text>
           {odds.isLoading ? <Text style={styles.notice}>Loading odds…</Text> : null}
@@ -144,6 +237,8 @@ export function PackDetailScreen() {
             </View>
           ))}
 
+          {pack.drop && !dropOpen ? null : (
+          <View>
           <Text style={styles.section}>Quantity</Text>
           {quantity === 0 ? (
             <Text style={styles.notice}>None available to select.</Text>
@@ -159,8 +254,8 @@ export function PackDetailScreen() {
                 </Pressable>
                 <Text style={styles.quantity}>{quantity}</Text>
                 <Pressable
-                  disabled={pack.reservable <= BigInt(quantity)}
-                  style={[styles.step, pack.reservable <= BigInt(quantity) && styles.stepDisabled]}
+                  disabled={selectionCap <= BigInt(quantity)}
+                  style={[styles.step, selectionCap <= BigInt(quantity) && styles.stepDisabled]}
                   onPress={() => setRequested(quantity + 1)}
                 >
                   <Text style={styles.stepLabel}>+</Text>
@@ -170,8 +265,8 @@ export function PackDetailScreen() {
                 {quantity} × {formatCents(pack.priceCents)} = {formatCents(pack.priceCents * BigInt(quantity))}
               </Text>
               <Pressable
-                disabled={!online || reserving || reserveUnknown}
-                style={[styles.retry, (!online || reserving || reserveUnknown) && styles.stepDisabled]}
+                disabled={!online || !dropOpen || reserving || reserveUnknown}
+                style={[styles.retry, (!online || !dropOpen || reserving || reserveUnknown) && styles.stepDisabled]}
                 onPress={() => startReserve(true)}
               >
                 <Text style={styles.retryLabel}>{reserving ? "Reserving…" : "Reserve"}</Text>
@@ -187,10 +282,20 @@ export function PackDetailScreen() {
               ) : null}
             </View>
           )}
+          </View>
+          )}
         </View>
       ) : null}
     </ScrollView>
   );
+}
+
+function reserveCap(reservable: bigint, maxPerUser: number | null): bigint {
+  if (maxPerUser === null) {
+    return reservable;
+  }
+  const limit = BigInt(maxPerUser);
+  return reservable < limit ? reservable : limit;
 }
 
 const styles = StyleSheet.create({

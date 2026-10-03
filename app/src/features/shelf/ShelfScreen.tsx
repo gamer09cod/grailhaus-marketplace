@@ -50,6 +50,9 @@ export function ShelfScreen() {
       <View style={styles.header}>
         <Text style={styles.brand}>GrailHaus</Text>
         <View style={styles.headerLinks}>
+          <Pressable onPress={() => navigation.navigate("Collection")}>
+            <Text style={styles.link}>Collection</Text>
+          </Pressable>
           <Pressable onPress={() => navigation.navigate("Cart")}>
             <Text style={styles.link}>Cart</Text>
           </Pressable>
@@ -107,7 +110,10 @@ export function ShelfScreen() {
           ))
         : null}
 
-      <Text style={styles.placeholder}>Timed drops are not listed here.</Text>
+      <Pressable onPress={() => navigation.navigate("Drops")} style={styles.categoryLink}>
+        <Text style={styles.categoryName}>Drops</Text>
+        <Text style={styles.categoryMeta}>Limited packs. The countdown uses server time.</Text>
+      </Pressable>
     </ScrollView>
   );
 }
