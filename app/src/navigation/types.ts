@@ -11,4 +11,5 @@ export type AppStackParamList = {
   Listing: { ownedItemId: string };
   Market: undefined;
   Qa: undefined;
+  Reveal: { purchasedPackIds: string[] };
 };

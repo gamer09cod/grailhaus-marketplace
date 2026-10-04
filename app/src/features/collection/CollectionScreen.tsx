@@ -13,6 +13,7 @@ import {
   View,
 } from "react-native";
 
+import { loadSealedPacks } from "../../api/reveal";
 import { supabase } from "../../api/supabase";
 import type { AppStackParamList } from "../../navigation/types";
 import { formatCents } from "../../utils/money";
@@ -26,9 +27,14 @@ export function CollectionScreen() {
     queryKey: ["holdings"],
     queryFn: loadHoldings,
   });
+  const sealed = useQuery({
+    queryKey: ["sealed-packs"],
+    queryFn: loadSealedPacks,
+  });
 
   const refresh = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: ["holdings"] });
+    void queryClient.invalidateQueries({ queryKey: ["sealed-packs"] });
   }, [queryClient]);
 
   useFocusEffect(
@@ -44,11 +50,14 @@ export function CollectionScreen() {
       }
     });
     const channel = supabase
-      .channel("collection-listings")
+      .channel(`collection-listings-${Date.now()}-${Math.random().toString(16).slice(2)}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "owned_items" }, () => {
         refresh();
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "marketplace_listings" }, () => {
+        refresh();
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "purchased_packs" }, () => {
         refresh();
       })
       .subscribe();
@@ -63,9 +72,12 @@ export function CollectionScreen() {
       contentContainerStyle={styles.content}
       refreshControl={
         <RefreshControl
-          refreshing={holdings.isRefetching && !holdings.isLoading}
+          refreshing={(holdings.isRefetching || sealed.isRefetching) && !holdings.isLoading && !sealed.isLoading}
           tintColor="#e4c07a"
-          onRefresh={() => void holdings.refetch()}
+          onRefresh={() => {
+            void holdings.refetch();
+            void sealed.refetch();
+          }}
         />
       }
       style={styles.screen}
@@ -74,22 +86,43 @@ export function CollectionScreen() {
         <Text style={styles.link}>Shelf</Text>
       </Pressable>
       <Text style={styles.title}>Collection</Text>
-      {holdings.isLoading ? (
+      {holdings.isLoading || sealed.isLoading ? (
         <View>
           <ActivityIndicator color="#e4c07a" />
           <Text style={styles.notice}>Loading your items…</Text>
         </View>
       ) : null}
-      {holdings.isError ? (
+      {holdings.isError || sealed.isError ? (
         <View>
           <Text style={styles.notice}>Your items didn't load. Check the connection and try again.</Text>
-          <Pressable style={styles.primary} onPress={() => void holdings.refetch()}>
+          <Pressable
+            style={styles.primary}
+            onPress={() => {
+              void holdings.refetch();
+              void sealed.refetch();
+            }}
+          >
             <Text style={styles.primaryLabel}>Try again</Text>
           </Pressable>
         </View>
       ) : null}
-      {holdings.data && holdings.data.length === 0 ? (
+      {sealed.data?.map((pack) => (
+        <Pressable
+          key={pack.purchasedPackId}
+          style={styles.card}
+          onPress={() => navigation.navigate("Reveal", { purchasedPackIds: [pack.purchasedPackId] })}
+        >
+          <Text style={styles.category}>Trading cards</Text>
+          <Text style={styles.name}>{pack.name}</Text>
+          <Text style={styles.meta}>{pack.tier}</Text>
+          <Text style={styles.listed}>Sealed</Text>
+        </Pressable>
+      ))}
+      {holdings.data && holdings.data.length === 0 && (sealed.data?.length ?? 0) === 0 ? (
         <Text style={styles.notice}>You don't own any items yet.</Text>
+      ) : null}
+      {holdings.data && holdings.data.length === 0 && (sealed.data?.length ?? 0) > 0 ? (
+        <Text style={styles.notice}>Opened items show up here.</Text>
       ) : null}
       {holdings.data?.map((holding) => (
         <Pressable

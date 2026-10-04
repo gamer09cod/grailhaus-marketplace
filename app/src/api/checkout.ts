@@ -16,6 +16,7 @@ export type CheckoutReceipt = {
   idempotencyKey: string;
   packCount: number;
   listingCount: number;
+  sealedPackIds: string[];
 };
 
 export class CheckoutRejected extends Error {
@@ -93,7 +94,22 @@ export async function submitCheckout(input: {
     idempotencyKey: payload.idempotencyKey,
     packCount: payload.packs.length,
     listingCount: Array.isArray(payload.listings) ? payload.listings.length : 0,
+    sealedPackIds: sealedPackIds(payload.packs),
   };
+}
+
+function sealedPackIds(packs: unknown[]): string[] {
+  const ids: string[] = [];
+  for (const pack of packs) {
+    if (typeof pack !== "object" || pack === null) {
+      continue;
+    }
+    const id = (pack as { purchasedPackId?: unknown }).purchasedPackId;
+    if (typeof id === "string") {
+      ids.push(id);
+    }
+  }
+  return ids;
 }
 
 function isDomainError(value: unknown): value is { code: string; message: string } {

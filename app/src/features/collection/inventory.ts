@@ -30,6 +30,12 @@ export async function loadHoldings(): Promise<OwnedHolding[]> {
         id,
         price_cents,
         status
+      ),
+      purchased_packs (
+        reveal_state,
+        pack_skus (
+          category
+        )
       )
     `)
     .order("acquired_at", { ascending: false });
@@ -63,9 +69,19 @@ function parseHolding(entry: {
     current_value_cents: number | string;
   }[] | null;
   marketplace_listings: { id: string; price_cents: number | string; status: string }[] | null;
+  purchased_packs: {
+    reveal_state: string;
+    pack_skus: { category: string } | { category: string }[] | null;
+  } | {
+    reveal_state: string;
+    pack_skus: { category: string } | { category: string }[] | null;
+  }[] | null;
 }): OwnedHolding | null {
   const item = Array.isArray(entry.catalog_items) ? entry.catalog_items[0] : entry.catalog_items;
   if (!item || !isPackCategory(item.category) || (entry.state !== "OWNED" && entry.state !== "LISTED")) {
+    return null;
+  }
+  if (isSealedCard(entry.purchased_packs)) {
     return null;
   }
   const active = (entry.marketplace_listings ?? []).find((listing) => listing.status === "ACTIVE");
@@ -79,4 +95,19 @@ function parseHolding(entry: {
     listingId: active?.id ?? null,
     listingPriceCents: active ? centsFromWire(active.price_cents) : null,
   };
+}
+
+function isSealedCard(pack: {
+  reveal_state: string;
+  pack_skus: { category: string } | { category: string }[] | null;
+} | {
+  reveal_state: string;
+  pack_skus: { category: string } | { category: string }[] | null;
+}[] | null): boolean {
+  const origin = Array.isArray(pack) ? pack[0] : pack;
+  if (!origin || origin.reveal_state === "PACK_COMPLETE") {
+    return false;
+  }
+  const sku = Array.isArray(origin.pack_skus) ? origin.pack_skus[0] : origin.pack_skus;
+  return sku?.category === "TRADING_CARD";
 }

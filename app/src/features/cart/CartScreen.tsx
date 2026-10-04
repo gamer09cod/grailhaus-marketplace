@@ -36,6 +36,7 @@ export function CartScreen() {
   const online = useOnline();
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [notice, setNotice] = useState<string | null>(null);
+  const [openPackIds, setOpenPackIds] = useState<string[]>([]);
   const [pendingLineId, setPendingLineId] = useState<string | null>(null);
   const [awaitingResult, setAwaitingResult] = useState(false);
   const [paying, setPaying] = useState(false);
@@ -164,11 +165,13 @@ export function CartScreen() {
         parts.push(receipt.listingCount === 1 ? "1 listing is now yours." : `${receipt.listingCount} listings are now yours.`);
       }
       setNotice(`Paid ${formatCents(receipt.totalCents)}.\nBalance ${formatCents(receipt.balanceCents)}.${parts.length ? `\n${parts.join(" ")}` : ""}`);
+      setOpenPackIds(receipt.sealedPackIds);
       void queryClient.invalidateQueries({ queryKey: ["cart"] });
       void queryClient.invalidateQueries({ queryKey: ["wallet"] });
       void queryClient.invalidateQueries({ queryKey: ["shelf-packs"] });
       void queryClient.invalidateQueries({ queryKey: ["market"] });
       void queryClient.invalidateQueries({ queryKey: ["holdings"] });
+      void queryClient.invalidateQueries({ queryKey: ["sealed-packs"] });
     } catch (error) {
       if (error instanceof CheckoutUnknown) {
         setAwaitingPayment(true);
@@ -177,6 +180,7 @@ export function CartScreen() {
       }
       payment.current = null;
       setAwaitingPayment(false);
+      setOpenPackIds([]);
       setNotice(error instanceof CheckoutRejected ? error.message : "The payment was rejected.");
       void queryClient.invalidateQueries({ queryKey: ["cart"] });
       void queryClient.invalidateQueries({ queryKey: ["shelf-packs"] });
@@ -240,6 +244,16 @@ export function CartScreen() {
         <Text style={styles.notice}>Your cart is empty.</Text>
       ) : null}
       {notice ? <Text style={styles.notice}>{notice}</Text> : null}
+      {openPackIds.length > 0 ? (
+        <Pressable
+          style={styles.primary}
+          onPress={() => navigation.navigate("Reveal", { purchasedPackIds: openPackIds })}
+        >
+          <Text style={styles.primaryLabel}>
+            {openPackIds.length === 1 ? "Open pack" : `Open ${openPackIds.length} packs`}
+          </Text>
+        </Pressable>
+      ) : null}
       {awaitingResult ? (
         <Pressable
           style={styles.primary}
