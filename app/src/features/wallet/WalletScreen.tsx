@@ -69,9 +69,16 @@ export function WalletScreen() {
         void queryClient.invalidateQueries({ queryKey: ["catalog-summary", userId] });
       }
     });
+    const channel = supabase
+      .channel(`wallet-${userId}`)
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "wallets", filter: `user_id=eq.${userId}` }, () => {
+        void queryClient.invalidateQueries({ queryKey: ["wallet", userId] });
+      })
+      .subscribe();
     return () => {
       network();
       appState.remove();
+      void supabase.removeChannel(channel);
     };
   }, [queryClient, userId]);
 
@@ -182,6 +189,9 @@ export function WalletScreen() {
             ? "Catalog unavailable. Check the connection and reopen the wallet."
             : `${catalog.data?.itemCount ?? 0} collectibles across ${catalog.data?.packCount ?? 0} packs`}
       </Text>
+      <Pressable delayLongPress={3000} onLongPress={() => navigation.navigate("Qa")}>
+        <Text style={styles.version}>Version 1.0.0</Text>
+      </Pressable>
       {!online ? (
         <Text style={styles.notice}>You're offline. Balances and the catalog may be out of date.</Text>
       ) : null}
@@ -266,6 +276,10 @@ const styles = StyleSheet.create({
   catalog: {
     color: "#c9bfb2",
     marginTop: 12,
+  },
+  version: {
+    color: "#8d8478",
+    marginTop: 8,
   },
   section: {
     color: "#f4efe6",

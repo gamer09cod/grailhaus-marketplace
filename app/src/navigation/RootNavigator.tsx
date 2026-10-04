@@ -12,6 +12,7 @@ import { MarketScreen } from "../features/market/MarketScreen";
 import { CategoryScreen } from "../features/shelf/CategoryScreen";
 import { PackDetailScreen } from "../features/shelf/PackDetailScreen";
 import { ShelfScreen } from "../features/shelf/ShelfScreen";
+import { QaScreen } from "../features/qa/QaScreen";
 import { WalletScreen } from "../features/wallet/WalletScreen";
 import type { AppStackParamList } from "./types";
 
@@ -58,6 +59,7 @@ export function RootNavigator() {
           <AppStack.Screen name="Market" component={MarketScreen} />
           <AppStack.Screen name="Collection" component={CollectionScreen} />
           <AppStack.Screen name="Listing" component={ListingScreen} />
+          <AppStack.Screen name="Qa" component={QaScreen} />
         </AppStack.Navigator>
       ) : (
         <AuthStack.Navigator screenOptions={{ headerShown: false }}>

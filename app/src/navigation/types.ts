@@ -10,4 +10,5 @@ export type AppStackParamList = {
   Collection: undefined;
   Listing: { ownedItemId: string };
   Market: undefined;
+  Qa: undefined;
 };

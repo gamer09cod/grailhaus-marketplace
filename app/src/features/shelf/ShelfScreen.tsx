@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useEffect } from "react";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -12,6 +12,7 @@ import {
   View,
 } from "react-native";
 
+import { supabase } from "../../api/supabase";
 import type { AppStackParamList, PackCategory } from "../../navigation/types";
 import { formatCents } from "../../utils/money";
 import { PackCard } from "./PackCard";
@@ -32,6 +33,18 @@ export function ShelfScreen() {
       void queryClient.invalidateQueries({ queryKey: ["shelf-packs"] });
     }, [queryClient]),
   );
+
+  useEffect(() => {
+    const channel = supabase
+      .channel("shelf-stock")
+      .on("postgres_changes", { event: "*", schema: "public", table: "pack_skus" }, () => {
+        void queryClient.invalidateQueries({ queryKey: ["shelf-packs"] });
+      })
+      .subscribe();
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [queryClient]);
 
   const featured = packs.data ? featuredPacks(packs.data) : [];
 
