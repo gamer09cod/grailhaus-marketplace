@@ -36,7 +36,7 @@ export function ShelfScreen() {
 
   useEffect(() => {
     const channel = supabase
-      .channel("shelf-stock")
+      .channel(`shelf-stock-${Date.now()}-${Math.random().toString(16).slice(2)}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "pack_skus" }, () => {
         void queryClient.invalidateQueries({ queryKey: ["shelf-packs"] });
       })

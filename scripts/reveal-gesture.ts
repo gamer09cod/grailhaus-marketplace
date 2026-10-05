@@ -1,4 +1,5 @@
 import { bestPull, fanInOpenOrder, openMode, packsOpenedLabel, sumCents } from "../app/src/features/reveal/pacing.ts";
+import { cardAnnouncement, nextCardLabel, revealMotion, sealedDirection, spokenCents } from "../app/src/features/reveal/access.ts";
 import { backgroundDuringTear, recoveryCursor, recoveryShowsCard } from "../app/src/features/reveal/recovery.ts";
 import { anticipationMs, cardsInStoredOrder, decideTear, velocityPxPerMs } from "../app/src/features/reveal/tear.ts";
 
@@ -107,5 +108,28 @@ assert(killedAtSix.slice(6).every((state) => state === "SEALED"), "packs after t
 
 assert(recoveryCursor(Array.from({ length: 10 }, () => "PACK_COMPLETE")) === "summary", "a finished 10-pack did not summarize");
 assert(recoveryCursor(["PACK_COMPLETE"]) === 0, "one finished pack opened the 10-pack summary");
+
+const fullMotion = revealMotion(false);
+const quietMotion = revealMotion(true);
+assert(fullMotion.travelPx === 280 && fullMotion.scaleFrom === 1, "full motion dropped the tear");
+assert(quietMotion.travelPx === 0 && quietMotion.scaleFrom === 0.96 && quietMotion.fadeMs > 0, "reduce motion kept the large tear");
+assert(sealedDirection(false) === "Sealed. Drag down to tear it open.", "full motion hid the drag");
+assert(sealedDirection(true) === "Sealed. Reveal next card.", "reduce motion still asked for a drag");
+assert(nextCardLabel(true) === "Reveal next card", "another pack lost the next-card action");
+assert(nextCardLabel(false) === "Done", "the last pack offered another card");
+assert(
+  cardAnnouncement({ rarity: "RARE", name: "Eclipse Dragon", estimatedValueCents: 12000n })
+    === "Rare card revealed. Eclipse Dragon. Estimated value 120 dollars.",
+  "the revealed card was not announced from the stored name and cents",
+);
+assert(spokenCents(100n) === "1 dollar", "one dollar was spoken as cents");
+assert(spokenCents(350n) === "3 dollars and 50 cents", "a remainder was spoken with a float");
+assert(spokenCents(1n) === "1 cent", "one cent was spoken as a dollar");
+assert(spokenCents(101n) === "1 dollar and 1 cent", "a leftover cent was dropped");
+assert(
+  cardAnnouncement({ rarity: "COMMON", name: "Cedar Finch", estimatedValueCents: 350n })
+    === "Common card revealed. Cedar Finch. Estimated value 3 dollars and 50 cents.",
+  "haptics being off changed the spoken card",
+);
 
 console.log("REVEAL_GESTURE_OK");
