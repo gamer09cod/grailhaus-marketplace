@@ -20,6 +20,7 @@ import { dollarsToCents, formatCents } from "../../utils/money";
 import { categoryLabel } from "../shelf/packs";
 import { useOnline } from "../shelf/useOnline";
 import { loadHoldings } from "./inventory";
+import { formatSignedCents, profitCents } from "./portfolio";
 
 export function ListingScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<AppStackParamList>>();
@@ -124,6 +125,12 @@ export function ListingScreen() {
           <Text style={styles.name}>{holding.name}</Text>
           <Text style={styles.label}>Current estimated value</Text>
           <Text style={styles.value}>{formatCents(holding.estimatedValueCents)}</Text>
+          <Text style={styles.label}>Paid</Text>
+          <Text style={styles.value}>{formatCents(holding.acquisitionPriceCents)}</Text>
+          <Text style={styles.label}>P&L</Text>
+          <Text style={styles.value}>
+            {formatSignedCents(profitCents(holding.estimatedValueCents, holding.acquisitionPriceCents))}
+          </Text>
           {listed && holding.listingPriceCents !== null ? (
             <Text style={styles.notice}>Listed at {formatCents(holding.listingPriceCents)}</Text>
           ) : null}

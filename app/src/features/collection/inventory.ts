@@ -8,7 +8,10 @@ export type OwnedHolding = {
   name: string;
   category: PackCategory;
   rarity: string;
+  imageUrl: string | null;
   estimatedValueCents: bigint;
+  acquisitionPriceCents: bigint;
+  acquiredAt: string;
   state: "OWNED" | "LISTED";
   listingId: string | null;
   listingPriceCents: bigint | null;
@@ -20,10 +23,13 @@ export async function loadHoldings(): Promise<OwnedHolding[]> {
     .select(`
       id,
       state,
+      acquisition_price_cents,
+      acquired_at,
       catalog_items (
         name,
         category,
         rarity,
+        image_url,
         current_value_cents
       ),
       marketplace_listings (
@@ -57,15 +63,19 @@ export async function loadHoldings(): Promise<OwnedHolding[]> {
 function parseHolding(entry: {
   id: string;
   state: string;
+  acquisition_price_cents: number | string;
+  acquired_at: string;
   catalog_items: {
     name: string;
     category: string;
     rarity: string;
+    image_url: string | null;
     current_value_cents: number | string;
   } | {
     name: string;
     category: string;
     rarity: string;
+    image_url: string | null;
     current_value_cents: number | string;
   }[] | null;
   marketplace_listings: { id: string; price_cents: number | string; status: string }[] | null;
@@ -90,7 +100,10 @@ function parseHolding(entry: {
     name: item.name,
     category: item.category,
     rarity: item.rarity,
+    imageUrl: item.image_url && item.image_url.length > 0 ? item.image_url : null,
     estimatedValueCents: centsFromWire(item.current_value_cents),
+    acquisitionPriceCents: centsFromWire(entry.acquisition_price_cents),
+    acquiredAt: entry.acquired_at,
     state: entry.state,
     listingId: active?.id ?? null,
     listingPriceCents: active ? centsFromWire(active.price_cents) : null,
