@@ -5,6 +5,7 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ActivityIndicator,
+  AppState,
   PanResponder,
   Pressable,
   StyleSheet,
@@ -25,6 +26,7 @@ import { formatCents } from "../../utils/money";
 import { useOnline } from "../shelf/useOnline";
 import { loadHapticsEnabled, playHaptic, playRarityHaptic, saveHapticsEnabled } from "./haptics";
 import { bestPull, fanInOpenOrder, openMode, packsOpenedLabel, sumCents, type OpenMode } from "./pacing";
+import { backgroundDuringTear, recoveryCursor, recoveryShowsCard } from "./recovery";
 import { anticipationMs, decideTear, isHighRarity, velocityPxPerMs } from "./tear";
 
 type RevealPhase = "SEALED" | "DRAGGING" | "TEARING" | "OPEN" | "REVEALING_CARD" | "CARD_REVEALED" | "PACK_COMPLETE";
@@ -60,6 +62,8 @@ export function RevealScreen() {
   const cursorRef = useRef(0);
   const packsRef = useRef<RevealPack[]>([]);
   const touched = useRef(false);
+  const gestureEpoch = useRef(0);
+  const grantEpoch = useRef(0);
   const samples = useRef<{ t: number; y: number }[]>([]);
   const placed = useRef(false);
   const packRef = useRef<RevealPack | null>(null);
@@ -173,19 +177,24 @@ export function RevealScreen() {
   const continueReveal = useCallback(async (pack: RevealPack, stored: string) => {
     const card = pack.cards[0];
     setPresentation(openMode(cursorRef.current + 1, card?.rarity ?? "COMMON"));
+    if (!recoveryShowsCard(stored)) {
+      setRevealPhase("SEALED");
+      return;
+    }
     if (stored === "CARD_REVEALED" || stored === "PACK_COMPLETE") {
       setRevealPhase(stored);
       return;
     }
-    if (stored === "OPEN") {
-      setRevealPhase("OPEN");
-      await presentCard(pack);
+    if (!card) {
+      setNotice("This pack has no stored card.");
       return;
     }
-    if (stored === "REVEALING_CARD") {
-      await presentCard(pack);
+    if (stored === "OPEN") {
+      await submitReveal(pack.purchasedPackId, "REVEALING_CARD");
     }
-  }, [presentCard, setRevealPhase]);
+    await submitReveal(pack.purchasedPackId, "CARD_REVEALED");
+    setRevealPhase("CARD_REVEALED");
+  }, [setRevealPhase]);
 
   const resume = useCallback(async (pack: RevealPack, stored: string) => {
     if (workingRef.current) {
@@ -211,41 +220,73 @@ export function RevealScreen() {
     }
     placed.current = true;
     packsRef.current = loadedPacks;
-    const first = loadedPacks.findIndex((pack) => pack.revealState !== "PACK_COMPLETE");
-    if (first === -1) {
-      if (loadedPacks.length > 1) {
-        setSummary(true);
-        return;
-      }
-      setRevealPhase("PACK_COMPLETE");
+    const first = recoveryCursor(loadedPacks.map((pack) => pack.revealState));
+    if (first === "summary") {
+      setSummary(true);
       return;
     }
     setCursorAt(first);
     const pack = loadedPacks[first];
-    if (!pack || pack.category !== "TRADING_CARD" || pack.revealState === "SEALED") {
+    if (!pack || pack.category !== "TRADING_CARD" || !recoveryShowsCard(pack.revealState)) {
       setRevealPhase("SEALED");
+      return;
+    }
+    if (pack.revealState === "PACK_COMPLETE") {
+      setRevealPhase("PACK_COMPLETE");
       return;
     }
     void resume(pack, pack.revealState);
   }, [resume, session.data, setCursorAt, setRevealPhase]);
 
   const refetchSession = session.refetch;
+  const reconcileSealed = useCallback(() => {
+    void refetchSession().then((result) => {
+      if (!placed.current) {
+        return;
+      }
+      const current = result.data?.[cursorRef.current];
+      if (!current || phaseRef.current !== "SEALED" || settlingRef.current || workingRef.current) {
+        return;
+      }
+      if (recoveryShowsCard(current.revealState) && current.category === "TRADING_CARD") {
+        void resume(current, current.revealState);
+      }
+    });
+  }, [refetchSession, resume]);
+
   useFocusEffect(
     useCallback(() => {
-      void refetchSession().then((result) => {
-        if (!placed.current) {
-          return;
-        }
-        const current = result.data?.[cursorRef.current];
-        if (!current || phaseRef.current !== "SEALED" || settlingRef.current || workingRef.current) {
-          return;
-        }
-        if (current.revealState !== "SEALED" && current.category === "TRADING_CARD") {
-          void resume(current, current.revealState);
-        }
-      });
-    }, [refetchSession, resume]),
+      reconcileSealed();
+    }, [reconcileSealed]),
   );
+
+  const resetUncommitted = useCallback(() => {
+    if (springFrame.current !== null) {
+      cancelAnimationFrame(springFrame.current);
+      springFrame.current = null;
+    }
+    settlingRef.current = false;
+    setSettling(false);
+    offsetRef.current = 0;
+    setOffset(0);
+    setRevealPhase("SEALED");
+  }, [setRevealPhase]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (next) => {
+      if (next === "background") {
+        if (backgroundDuringTear(phaseRef.current) === "reset") {
+          gestureEpoch.current += 1;
+          resetUncommitted();
+        }
+        return;
+      }
+      if (next === "active") {
+        reconcileSealed();
+      }
+    });
+    return () => subscription.remove();
+  }, [reconcileSealed, resetUncommitted]);
 
   const glide = useCallback((to: number, ms: number) => {
     return new Promise<void>((resolve) => {
@@ -335,10 +376,14 @@ export function RevealScreen() {
       onMoveShouldSetPanResponder: () =>
         (phaseRef.current === "SEALED" || phaseRef.current === "DRAGGING") && !settlingRef.current && !workingRef.current,
       onPanResponderGrant: () => {
+        grantEpoch.current = gestureEpoch.current;
         samples.current = [{ t: Date.now(), y: 0 }];
         touched.current = false;
       },
       onPanResponderMove: (_event, gesture) => {
+        if (grantEpoch.current !== gestureEpoch.current) {
+          return;
+        }
         if (phaseRef.current !== "SEALED" && phaseRef.current !== "DRAGGING") {
           return;
         }
@@ -359,6 +404,9 @@ export function RevealScreen() {
         }
       },
       onPanResponderRelease: (_event, gesture) => {
+        if (grantEpoch.current !== gestureEpoch.current) {
+          return;
+        }
         if (phaseRef.current !== "SEALED" && phaseRef.current !== "DRAGGING") {
           return;
         }
@@ -378,6 +426,9 @@ export function RevealScreen() {
         springRef.current(distance);
       },
       onPanResponderTerminate: () => {
+        if (grantEpoch.current !== gestureEpoch.current) {
+          return;
+        }
         if (phaseRef.current === "DRAGGING") {
           springRef.current(offsetRef.current);
         }

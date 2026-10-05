@@ -1,4 +1,5 @@
 import { bestPull, fanInOpenOrder, openMode, packsOpenedLabel, sumCents } from "../app/src/features/reveal/pacing.ts";
+import { backgroundDuringTear, recoveryCursor, recoveryShowsCard } from "../app/src/features/reveal/recovery.ts";
 import { anticipationMs, cardsInStoredOrder, decideTear, velocityPxPerMs } from "../app/src/features/reveal/tear.ts";
 
 function assert(condition: boolean, message: string): void {
@@ -72,5 +73,39 @@ assert(sumCents([1000n, 1000n, 1000n, 1000n, 1000n, 1000n, 1000n, 1000n, 1000n, 
 assert(sumCents([199n, 1n]) === 200n, "cents were not added as integers");
 assert(packsOpenedLabel(10) === "10 Packs Opened", "the summary count was wrong");
 assert(packsOpenedLabel(1) === "1 Pack Opened", "a single pack used the plural label");
+
+assert(backgroundDuringTear("DRAGGING") === "reset", "a background during the drag committed the tear");
+assert(backgroundDuringTear("SEALED") === "reset", "a background left the sleeve pulled open");
+assert(backgroundDuringTear("TEARING") === "keep", "a background dropped a tear the server was already storing");
+assert(backgroundDuringTear("OPEN") === "keep", "a background hid a card the tear had stored");
+assert(backgroundDuringTear("REVEALING_CARD") === "keep", "a background hid the card mid-reveal");
+assert(backgroundDuringTear("CARD_REVEALED") === "keep", "a background hid a revealed card");
+
+const fresh = Array.from({ length: 10 }, () => "SEALED");
+assert(recoveryCursor(fresh) === 0, "a new purchase did not start on pack 1");
+assert(recoveryShowsCard("SEALED") === false, "a sealed pack showed its card after reopen");
+assert(openMode(1, "COMMON") === "full", "pack 1 of a fresh purchase used Fast Open");
+
+const killedAtSix = [
+  "PACK_COMPLETE",
+  "PACK_COMPLETE",
+  "PACK_COMPLETE",
+  "PACK_COMPLETE",
+  "PACK_COMPLETE",
+  "OPEN",
+  "SEALED",
+  "SEALED",
+  "SEALED",
+  "SEALED",
+];
+assert(recoveryCursor(killedAtSix) === 5, "pack 6 was not the interrupted pack");
+assert(recoveryShowsCard("OPEN") === true, "an opened pack tore again after a kill");
+assert(recoveryShowsCard("REVEALING_CARD") === true, "a mid-reveal pack tore again");
+assert(recoveryShowsCard("CARD_REVEALED") === true, "a revealed pack tore again");
+assert(openMode(6, "COMMON") === "fast", "pack 6 left the fast path");
+assert(killedAtSix.slice(6).every((state) => state === "SEALED"), "packs after the interrupted one were opened");
+
+assert(recoveryCursor(Array.from({ length: 10 }, () => "PACK_COMPLETE")) === "summary", "a finished 10-pack did not summarize");
+assert(recoveryCursor(["PACK_COMPLETE"]) === 0, "one finished pack opened the 10-pack summary");
 
 console.log("REVEAL_GESTURE_OK");
