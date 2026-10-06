@@ -22,8 +22,16 @@ import {
   type CartLine,
   type CartSnapshot,
 } from "../../api/cart";
-import { CheckoutRejected, CheckoutUnknown, submitCheckout } from "../../api/checkout";
-import { supabase } from "../../api/supabase";
+import {
+  CheckoutRejected,
+  CheckoutUnknown,
+  clearInflightCheckout,
+  readInflightCheckout,
+  rememberInflightCheckout,
+  submitCheckout,
+} from "../../api/checkout";
+import { centsFromWire } from "../../utils/money";
+import { watchTables } from "../../api/live";
 import type { AppStackParamList } from "../../navigation/types";
 import { formatCents } from "../../utils/money";
 import { categoryLabel } from "../shelf/packs";
@@ -34,7 +42,6 @@ export function CartScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<AppStackParamList>>();
   const queryClient = useQueryClient();
   const online = useOnline();
-  const [nowMs, setNowMs] = useState(() => Date.now());
   const [notice, setNotice] = useState<string | null>(null);
   const [openPackIds, setOpenPackIds] = useState<string[]>([]);
   const [pendingLineId, setPendingLineId] = useState<string | null>(null);
@@ -43,6 +50,8 @@ export function CartScreen() {
   const [awaitingPayment, setAwaitingPayment] = useState(false);
   const inflight = useRef<LineCartAction | null>(null);
   const payment = useRef<PaymentRequest | null>(null);
+  const payingLock = useRef(false);
+  const resumedPayment = useRef(false);
   const cart = useQuery({
     queryKey: ["cart"],
     queryFn: loadCart,
@@ -65,28 +74,20 @@ export function CartScreen() {
         refreshCart();
       }
     });
-    const channel = supabase
-      .channel("cart-stock")
-      .on("postgres_changes", { event: "*", schema: "public", table: "pack_skus" }, () => {
-        refreshCart();
-      })
-      .on("postgres_changes", { event: "*", schema: "public", table: "cart_reservations" }, () => {
-        refreshCart();
-      })
-      .on("postgres_changes", { event: "*", schema: "public", table: "marketplace_listings" }, () => {
-        refreshCart();
-      })
-      .subscribe();
+    const stop = watchTables(
+      "cart-stock",
+      [{ table: "pack_skus" }, { table: "cart_reservations" }, { table: "marketplace_listings" }],
+      refreshCart,
+    );
     return () => {
       appState.remove();
-      void supabase.removeChannel(channel);
+      stop();
     };
   }, [refreshCart]);
 
   useEffect(() => {
     const timer = setInterval(() => {
       const nextNow = Date.now();
-      setNowMs(nextNow);
       const snapshot = cart.data;
       if (!snapshot) {
         return;
@@ -150,13 +151,16 @@ export function CartScreen() {
     }
     if (remember) {
       payment.current = request;
+      await rememberInflightCheckout(storedPayment(request));
     }
     setPaying(true);
     setNotice("Confirming purchase…");
     try {
       const receipt = await submitCheckout(request);
       payment.current = null;
+      payingLock.current = false;
       setAwaitingPayment(false);
+      await clearInflightCheckout();
       const parts: string[] = [];
       if (receipt.packCount > 0) {
         parts.push(receipt.packCount === 1 ? "1 pack is sealed." : `${receipt.packCount} packs are sealed.`);
@@ -179,8 +183,10 @@ export function CartScreen() {
         return;
       }
       payment.current = null;
+      payingLock.current = false;
       setAwaitingPayment(false);
       setOpenPackIds([]);
+      await clearInflightCheckout();
       setNotice(checkoutNotice(error));
       void queryClient.invalidateQueries({ queryKey: ["cart"] });
       void queryClient.invalidateQueries({ queryKey: ["shelf-packs"] });
@@ -190,12 +196,16 @@ export function CartScreen() {
   }
 
   function startPayment() {
+    if (!online || payingLock.current) {
+      return;
+    }
     const snapshot = cart.data;
     const total = snapshot ? payableTotal(snapshot.lines) : null;
     if (!snapshot?.cartId || total === null) {
       return;
     }
-    void runPayment({
+    payingLock.current = true;
+    const request = payment.current ?? {
       cartId: snapshot.cartId,
       idempotencyKey: Crypto.randomUUID(),
       expectedTotalCents: total,
@@ -204,8 +214,38 @@ export function CartScreen() {
         quantity: line.quantity,
         snapshotPriceCents: line.snapshotPriceCents,
       })),
-    }, true);
+    };
+    void runPayment(request, payment.current === null);
   }
+
+  useEffect(() => {
+    if (!online || resumedPayment.current) {
+      return;
+    }
+    resumedPayment.current = true;
+    void readInflightCheckout().then((saved) => {
+      if (!saved || payingLock.current) {
+        return;
+      }
+      const request: PaymentRequest = {
+        cartId: saved.cartId,
+        idempotencyKey: saved.idempotencyKey,
+        expectedTotalCents: centsFromWire(saved.expectedTotalCents),
+        lines: saved.lines.map((line) => ({
+          lineId: line.lineId,
+          quantity: line.quantity,
+          snapshotPriceCents: centsFromWire(line.snapshotPriceCents),
+        })),
+      };
+      payment.current = request;
+      payingLock.current = true;
+      setAwaitingPayment(true);
+      setNotice("Confirming purchase…\n\nYour order may have completed.\nWe're checking before retrying.");
+      void runPayment(request, false);
+    });
+    // Resume a payment that was sent before the app closed, once the network is back.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [online]);
 
   return (
     <ScrollView
@@ -301,7 +341,6 @@ export function CartScreen() {
           key={line.lineId}
           line={line}
           snapshot={cart.data}
-          nowMs={nowMs}
           busy={pendingLineId === line.lineId}
           disabled={!online || pendingLineId !== null || paying || awaitingPayment}
           onAccept={() => startLineAction(line, line.lineType === "PACK" ? "acceptPrice" : "acceptListingPrice")}
@@ -314,10 +353,26 @@ export function CartScreen() {
   );
 }
 
+function HoldCountdown({
+  expiresAt,
+  serverNow,
+  fetchedAtMs,
+}: {
+  expiresAt: string;
+  serverNow: string;
+  fetchedAtMs: number;
+}) {
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  return <Text style={styles.hold}>{remainingLabel(expiresAt, serverNow, fetchedAtMs, nowMs)}</Text>;
+}
+
 function CartLineCard({
   line,
   snapshot,
-  nowMs,
   busy,
   disabled,
   onAccept,
@@ -327,7 +382,6 @@ function CartLineCard({
 }: {
   line: CartLine;
   snapshot: CartSnapshot;
-  nowMs: number;
   busy: boolean;
   disabled: boolean;
   onAccept: () => void;
@@ -373,10 +427,6 @@ function CartLineCard({
     );
   }
 
-  const countdown = line.expiresAt
-    ? remainingLabel(line.expiresAt, snapshot.serverNow, snapshot.fetchedAtMs, nowMs)
-    : null;
-
   return (
     <View style={styles.card}>
       <Text style={styles.category}>{categoryLabel(line.category)}</Text>
@@ -385,7 +435,9 @@ function CartLineCard({
       <Text style={styles.meta}>Shown price {formatCents(line.snapshotPriceCents)}</Text>
       <Text style={styles.meta}>Current price {formatCents(line.currentPriceCents)}</Text>
       <Text style={styles.meta}>{line.availableQuantity.toString()} available</Text>
-      {line.state === "VALID" && countdown ? <Text style={styles.hold}>{countdown}</Text> : null}
+      {line.state === "VALID" && line.expiresAt ? (
+        <HoldCountdown expiresAt={line.expiresAt} fetchedAtMs={snapshot.fetchedAtMs} serverNow={snapshot.serverNow} />
+      ) : null}
       {line.state === "EXPIRED" ? (
         <View>
           <Text style={styles.warning}>Reservation expired</Text>
@@ -459,6 +511,24 @@ function payableTotal(lines: CartLine[]): bigint | null {
     total += line.snapshotPriceCents * BigInt(line.quantity);
   }
   return total;
+}
+
+function storedPayment(request: PaymentRequest): {
+  cartId: string;
+  idempotencyKey: string;
+  expectedTotalCents: string;
+  lines: { lineId: string; quantity: number; snapshotPriceCents: string }[];
+} {
+  return {
+    cartId: request.cartId,
+    idempotencyKey: request.idempotencyKey,
+    expectedTotalCents: request.expectedTotalCents.toString(),
+    lines: request.lines.map((line) => ({
+      lineId: line.lineId,
+      quantity: line.quantity,
+      snapshotPriceCents: line.snapshotPriceCents.toString(),
+    })),
+  };
 }
 
 function checkoutNotice(error: unknown): string {

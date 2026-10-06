@@ -12,7 +12,7 @@ import {
   View,
 } from "react-native";
 
-import { supabase } from "../../api/supabase";
+import { watchTables } from "../../api/live";
 import type { AppStackParamList, PackCategory } from "../../navigation/types";
 import { formatCents } from "../../utils/money";
 import { PackCard } from "./PackCard";
@@ -35,15 +35,9 @@ export function ShelfScreen() {
   );
 
   useEffect(() => {
-    const channel = supabase
-      .channel(`shelf-stock-${Date.now()}-${Math.random().toString(16).slice(2)}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "pack_skus" }, () => {
-        void queryClient.invalidateQueries({ queryKey: ["shelf-packs"] });
-      })
-      .subscribe();
-    return () => {
-      void supabase.removeChannel(channel);
-    };
+    return watchTables("shelf-stock", [{ table: "pack_skus" }], () => {
+      void queryClient.invalidateQueries({ queryKey: ["shelf-packs"] });
+    });
   }, [queryClient]);
 
   const featured = packs.data ? featuredPacks(packs.data) : [];

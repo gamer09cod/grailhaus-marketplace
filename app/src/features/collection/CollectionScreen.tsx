@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -6,10 +6,10 @@ import * as Crypto from "expo-crypto";
 import {
   ActivityIndicator,
   AppState,
+  FlatList,
   Image,
   Pressable,
   RefreshControl,
-  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -17,7 +17,7 @@ import {
 
 import { ListingRejected, ListingUnknown, submitListing } from "../../api/listing";
 import { loadSealedPacks } from "../../api/reveal";
-import { supabase } from "../../api/supabase";
+import { watchTables } from "../../api/live";
 import type { AppStackParamList, PackCategory } from "../../navigation/types";
 import { formatCents } from "../../utils/money";
 import { categoryLabel } from "../shelf/packs";
@@ -80,25 +80,18 @@ export function CollectionScreen() {
         refresh();
       }
     });
-    const channel = supabase
-      .channel(`collection-listings-${Date.now()}-${Math.random().toString(16).slice(2)}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "owned_items" }, () => {
-        refresh();
-      })
-      .on("postgres_changes", { event: "*", schema: "public", table: "marketplace_listings" }, () => {
-        refresh();
-      })
-      .on("postgres_changes", { event: "*", schema: "public", table: "purchased_packs" }, () => {
-        refresh();
-      })
-      .subscribe();
+    const stop = watchTables(
+      "collection",
+      [{ table: "owned_items" }, { table: "marketplace_listings" }, { table: "purchased_packs" }],
+      refresh,
+    );
     return () => {
       appState.remove();
-      void supabase.removeChannel(channel);
+      stop();
     };
   }, [refresh]);
 
-  async function delist(holding: OwnedHolding) {
+  const delist = useCallback(async (holding: OwnedHolding) => {
     if (!holding.listingId || !online || delistingId) {
       return;
     }
@@ -121,33 +114,35 @@ export function CollectionScreen() {
     } finally {
       setDelistingId(null);
     }
-  }
+  }, [delistingId, online, queryClient]);
 
-  return (
-    <ScrollView
-      contentContainerStyle={styles.content}
-      refreshControl={
-        <RefreshControl
-          refreshing={(holdings.isRefetching || sealed.isRefetching) && !holdings.isLoading && !sealed.isLoading}
-          tintColor="#e4c07a"
-          onRefresh={() => {
-            void holdings.refetch();
-            void sealed.refetch();
-          }}
-        />
-      }
-      style={styles.screen}
-    >
+  const visible = useMemo(
+    () => selectHoldings(holdings.data ?? [], filter, sort),
+    [filter, holdings.data, sort],
+  );
+  const totals = useMemo(
+    () => (holdings.data ? portfolioTotals(holdings.data) : null),
+    [holdings.data],
+  );
+  const openListing = useCallback((ownedItemId: string) => {
+    navigation.navigate("Listing", { ownedItemId });
+  }, [navigation]);
+  const openReveal = useCallback((purchasedPackId: string) => {
+    navigation.navigate("Reveal", { purchasedPackIds: [purchasedPackId] });
+  }, [navigation]);
+
+  const header = (
+    <View>
       <Pressable onPress={() => navigation.navigate("Shelf")}>
         <Text style={styles.link}>Shelf</Text>
       </Pressable>
       <Text style={styles.title}>Portfolio</Text>
-      {holdings.data ? (
+      {totals ? (
         <View>
           <Text style={styles.notice}>Total portfolio value</Text>
-          <Text style={styles.amount}>{formatCents(portfolioTotals(holdings.data).valueCents)}</Text>
+          <Text style={styles.amount}>{formatCents(totals.valueCents)}</Text>
           <Text style={styles.notice}>P&L</Text>
-          <Text style={styles.amount}>{formatSignedCents(portfolioTotals(holdings.data).profitCents)}</Text>
+          <Text style={styles.amount}>{formatSignedCents(totals.profitCents)}</Text>
         </View>
       ) : null}
       <View style={styles.chips}>
@@ -204,7 +199,7 @@ export function CollectionScreen() {
         <Pressable
           key={pack.purchasedPackId}
           style={styles.card}
-          onPress={() => navigation.navigate("Reveal", { purchasedPackIds: [pack.purchasedPackId] })}
+          onPress={() => openReveal(pack.purchasedPackId)}
         >
           <Text style={styles.category}>Trading cards</Text>
           <Text style={styles.name}>{pack.name}</Text>
@@ -218,75 +213,130 @@ export function CollectionScreen() {
       {holdings.data && holdings.data.length === 0 && (sealed.data?.length ?? 0) > 0 ? (
         <Text style={styles.notice}>Opened items show up here.</Text>
       ) : null}
-      {holdings.data && selectHoldings(holdings.data, filter, sort).length === 0 && holdings.data.length > 0 ? (
+      {holdings.data && visible.length === 0 && holdings.data.length > 0 ? (
         <Text style={styles.notice}>{emptyFilterCopy(filter)}</Text>
       ) : null}
-      {selectHoldings(holdings.data ?? [], filter, sort).map((holding) => (
-        <View key={holding.ownedItemId} style={styles.card}>
-          <View style={styles.item}>
-            {holding.imageUrl ? (
-              <Image accessibilityLabel={holding.name} source={{ uri: holding.imageUrl }} style={styles.thumb} />
-            ) : (
-              <View style={styles.thumb}>
-                <Text style={styles.mark}>{categoryMark(holding.category)}</Text>
-              </View>
-            )}
-            <View style={styles.itemBody}>
-              <Text style={styles.category}>{categoryLabel(holding.category)}</Text>
-              <Text style={styles.name}>{holding.name}</Text>
-              <Text style={styles.meta}>{holding.rarity}</Text>
-              <Text style={styles.meta}>Current value {formatCents(holding.estimatedValueCents)}</Text>
-              <Text style={styles.meta}>
-                P&L {formatSignedCents(profitCents(holding.estimatedValueCents, holding.acquisitionPriceCents))}
-              </Text>
-              <Text style={styles.listed}>
-                {holding.state === "LISTED" && holding.listingPriceCents !== null
-                  ? `Listed at ${formatCents(holding.listingPriceCents)}`
-                  : listedStateLabel(holding.state)}
-              </Text>
-            </View>
+    </View>
+  );
+
+  const renderHolding = useCallback(({ item }: { item: OwnedHolding }) => (
+    <HoldingRow
+      busy={delistingId === item.ownedItemId}
+      disabled={!online || delistingId !== null}
+      holding={item}
+      onDelist={delist}
+      onOpen={openListing}
+    />
+  ), [delist, delistingId, online, openListing]);
+
+  return (
+    <FlatList
+      contentContainerStyle={styles.content}
+      data={visible}
+      extraData={`${delistingId ?? ""}:${online}`}
+      initialNumToRender={8}
+      keyExtractor={(holding) => holding.ownedItemId}
+      ListHeaderComponent={header}
+      maxToRenderPerBatch={8}
+      refreshControl={
+        <RefreshControl
+          refreshing={(holdings.isRefetching || sealed.isRefetching) && !holdings.isLoading && !sealed.isLoading}
+          tintColor="#e4c07a"
+          onRefresh={() => {
+            void holdings.refetch();
+            void sealed.refetch();
+          }}
+        />
+      }
+      renderItem={renderHolding}
+      style={styles.screen}
+      windowSize={7}
+    />
+  );
+}
+
+const HoldingRow = memo(function HoldingRow({
+  holding,
+  busy,
+  disabled,
+  onOpen,
+  onDelist,
+}: {
+  holding: OwnedHolding;
+  busy: boolean;
+  disabled: boolean;
+  onOpen: (ownedItemId: string) => void;
+  onDelist: (holding: OwnedHolding) => void;
+}) {
+  return (
+    <View style={styles.card}>
+      <View style={styles.item}>
+        {holding.imageUrl ? (
+          <Image
+            accessibilityLabel={holding.name}
+            resizeMode="cover"
+            source={{ uri: holding.imageUrl }}
+            style={styles.thumb}
+          />
+        ) : (
+          <View style={styles.thumb}>
+            <Text style={styles.mark}>{categoryMark(holding.category)}</Text>
           </View>
+        )}
+        <View style={styles.itemBody}>
+          <Text style={styles.category}>{categoryLabel(holding.category)}</Text>
+          <Text style={styles.name}>{holding.name}</Text>
+          <Text style={styles.meta}>{holding.rarity}</Text>
+          <Text style={styles.meta}>Current value {formatCents(holding.estimatedValueCents)}</Text>
+          <Text style={styles.meta}>
+            P&L {formatSignedCents(profitCents(holding.estimatedValueCents, holding.acquisitionPriceCents))}
+          </Text>
+          <Text style={styles.listed}>
+            {holding.state === "LISTED" && holding.listingPriceCents !== null
+              ? `Listed at ${formatCents(holding.listingPriceCents)}`
+              : listedStateLabel(holding.state)}
+          </Text>
+        </View>
+      </View>
+      <View style={styles.actions}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="View details"
+          onPress={() => onOpen(holding.ownedItemId)}
+        >
+          <Text style={styles.action}>View details</Text>
+        </Pressable>
+        {holding.state === "LISTED" && holding.listingId ? (
           <View style={styles.actions}>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="View details"
-              onPress={() => navigation.navigate("Listing", { ownedItemId: holding.ownedItemId })}
+              accessibilityLabel="Edit listing"
+              onPress={() => onOpen(holding.ownedItemId)}
             >
-              <Text style={styles.action}>View details</Text>
+              <Text style={styles.action}>Edit listing</Text>
             </Pressable>
-            {holding.state === "LISTED" && holding.listingId ? (
-              <View style={styles.actions}>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Edit listing"
-                  onPress={() => navigation.navigate("Listing", { ownedItemId: holding.ownedItemId })}
-                >
-                  <Text style={styles.action}>Edit listing</Text>
-                </Pressable>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Delist"
-                  disabled={!online || delistingId !== null}
-                  onPress={() => void delist(holding)}
-                >
-                  <Text style={styles.action}>{delistingId === holding.ownedItemId ? "Removing…" : "Delist"}</Text>
-                </Pressable>
-              </View>
-            ) : (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="List for sale"
-                onPress={() => navigation.navigate("Listing", { ownedItemId: holding.ownedItemId })}
-              >
-                <Text style={styles.action}>List for sale</Text>
-              </Pressable>
-            )}
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Delist"
+              disabled={disabled}
+              onPress={() => onDelist(holding)}
+            >
+              <Text style={styles.action}>{busy ? "Removing…" : "Delist"}</Text>
+            </Pressable>
           </View>
-        </View>
-      ))}
-    </ScrollView>
+        ) : (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="List for sale"
+            onPress={() => onOpen(holding.ownedItemId)}
+          >
+            <Text style={styles.action}>List for sale</Text>
+          </Pressable>
+        )}
+      </View>
+    </View>
   );
-}
+});
 
 function emptyFilterCopy(filter: PortfolioFilter): string {
   if (filter === "TRADING_CARD") {

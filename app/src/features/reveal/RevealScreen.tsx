@@ -6,7 +6,9 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AccessibilityInfo,
   ActivityIndicator,
+  Animated,
   AppState,
+  Easing,
   PanResponder,
   Pressable,
   StyleSheet,
@@ -55,14 +57,15 @@ export function RevealScreen() {
   const [summary, setSummary] = useState(false);
   const [presentation, setPresentation] = useState<OpenMode>("full");
   const [phase, setPhase] = useState<RevealPhase>("SEALED");
-  const [offset, setOffset] = useState(0);
   const [settling, setSettling] = useState(false);
   const [hapticsOn, setHapticsOn] = useState(true);
   const [reduced, setReduced] = useState(false);
-  const [fade, setFade] = useState(1);
   const [notice, setNotice] = useState<string | null>(null);
   const [working, setWorking] = useState(false);
 
+  const dragY = useRef(new Animated.Value(0)).current;
+  const cardFade = useRef(new Animated.Value(1)).current;
+  const cardScale = useRef(cardFade.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1] })).current;
   const phaseRef = useRef<RevealPhase>("SEALED");
   const offsetRef = useRef(0);
   const settlingRef = useRef(false);
@@ -79,7 +82,7 @@ export function RevealScreen() {
   const samples = useRef<{ t: number; y: number }[]>([]);
   const placed = useRef(false);
   const packRef = useRef<RevealPack | null>(null);
-  const springFrame = useRef<number | null>(null);
+  const mounted = useRef(true);
 
   const packs = session.data ?? [];
   const loaded = packs[cursor] ?? null;
@@ -88,8 +91,12 @@ export function RevealScreen() {
     phaseRef.current = phase;
   }, [phase]);
   useEffect(() => {
-    offsetRef.current = offset;
-  }, [offset]);
+    return () => {
+      mounted.current = false;
+      dragY.stopAnimation();
+      cardFade.stopAnimation();
+    };
+  }, [cardFade, dragY]);
   useEffect(() => {
     hapticsRef.current = hapticsOn;
   }, [hapticsOn]);
@@ -123,32 +130,32 @@ export function RevealScreen() {
     setCursor(index);
   }, []);
 
+  const placeSleeve = useCallback((distance: number) => {
+    const next = Math.min(Math.max(0, distance), 320);
+    offsetRef.current = next;
+    dragY.setValue(next);
+  }, [dragY]);
+
   const springShut = useCallback((from: number) => {
-    if (springFrame.current !== null) {
-      cancelAnimationFrame(springFrame.current);
-    }
+    dragY.stopAnimation();
     settlingRef.current = true;
     setSettling(true);
-    const started = Date.now();
-    const tick = () => {
-      const t = Math.min(1, (Date.now() - started) / 220);
-      const eased = 1 - (1 - t) ** 3;
-      const next = from * (1 - eased);
-      offsetRef.current = next;
-      setOffset(next);
-      if (t < 1) {
-        springFrame.current = requestAnimationFrame(tick);
+    placeSleeve(from);
+    Animated.timing(dragY, {
+      toValue: 0,
+      duration: 220,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start(({ finished }) => {
+      if (!mounted.current || !finished) {
         return;
       }
-      springFrame.current = null;
+      offsetRef.current = 0;
       settlingRef.current = false;
       setSettling(false);
-      offsetRef.current = 0;
-      setOffset(0);
       setRevealPhase("SEALED");
-    };
-    springFrame.current = requestAnimationFrame(tick);
-  }, [setRevealPhase]);
+    });
+  }, [dragY, placeSleeve, setRevealPhase]);
 
   const showStoredCard = useCallback(async (pack: RevealPack, holdMs: number) => {
     const card = pack.cards[0];
@@ -282,16 +289,12 @@ export function RevealScreen() {
   );
 
   const resetUncommitted = useCallback(() => {
-    if (springFrame.current !== null) {
-      cancelAnimationFrame(springFrame.current);
-      springFrame.current = null;
-    }
+    dragY.stopAnimation();
     settlingRef.current = false;
     setSettling(false);
-    offsetRef.current = 0;
-    setOffset(0);
+    placeSleeve(0);
     setRevealPhase("SEALED");
-  }, [setRevealPhase]);
+  }, [dragY, placeSleeve, setRevealPhase]);
 
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (next) => {
@@ -333,28 +336,21 @@ export function RevealScreen() {
   }, [resetUncommitted]);
 
   const glide = useCallback((to: number, ms: number) => {
+    dragY.stopAnimation();
     return new Promise<void>((resolve) => {
-      if (springFrame.current !== null) {
-        cancelAnimationFrame(springFrame.current);
-      }
-      const from = offsetRef.current;
-      const started = Date.now();
-      const tick = () => {
-        const t = Math.min(1, (Date.now() - started) / ms);
-        const eased = 1 - (1 - t) ** 3;
-        const next = from + (to - from) * eased;
-        offsetRef.current = next;
-        setOffset(next);
-        if (t < 1) {
-          springFrame.current = requestAnimationFrame(tick);
-          return;
+      Animated.timing(dragY, {
+        toValue: to,
+        duration: ms,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: false,
+      }).start(({ finished }) => {
+        offsetRef.current = to;
+        if (finished) {
+          resolve();
         }
-        springFrame.current = null;
-        resolve();
-      };
-      springFrame.current = requestAnimationFrame(tick);
+      });
     });
-  }, []);
+  }, [dragY]);
 
   const commitTear = useCallback(async (source: "gesture" | "fast" | "reduced") => {
     const pack = packRef.current;
@@ -381,13 +377,11 @@ export function RevealScreen() {
     try {
       const travel = revealMotion(source === "reduced" || reducedRef.current).travelPx;
       if (travel === 0) {
-        offsetRef.current = 0;
-        setOffset(0);
+        placeSleeve(0);
       } else if (source === "fast") {
         await glide(travel, 260);
       } else {
-        offsetRef.current = travel;
-        setOffset(travel);
+        placeSleeve(travel);
       }
       playHaptic("tear", hapticsRef.current);
       await submitReveal(pack.purchasedPackId, "OPEN");
@@ -412,7 +406,7 @@ export function RevealScreen() {
       workingRef.current = false;
       setWorking(false);
     }
-  }, [glide, presentCard, setRevealPhase, springShut]);
+  }, [glide, placeSleeve, presentCard, setRevealPhase, springShut]);
 
   const commitRef = useRef(commitTear);
   const springRef = useRef(springShut);
@@ -443,12 +437,13 @@ export function RevealScreen() {
           return;
         }
         const distance = Math.max(0, gesture.dy);
-        offsetRef.current = distance;
-        setOffset(Math.min(distance, 320));
+        placeSleeve(distance);
         const now = Date.now();
         samples.current.push({ t: now, y: distance });
         const cutoff = now - 90;
-        samples.current = samples.current.filter((sample) => sample.t >= cutoff);
+        while (samples.current[0] && samples.current[0].t < cutoff) {
+          samples.current.shift();
+        }
         if (distance >= 8 && phaseRef.current === "SEALED") {
           phaseRef.current = "DRAGGING";
           setPhase("DRAGGING");
@@ -474,8 +469,7 @@ export function RevealScreen() {
         if (distance < 12) {
           phaseRef.current = "SEALED";
           setPhase("SEALED");
-          offsetRef.current = 0;
-          setOffset(0);
+          placeSleeve(0);
           return;
         }
         springRef.current(distance);
@@ -521,8 +515,7 @@ export function RevealScreen() {
         return;
       }
       setCursorAt(next);
-      offsetRef.current = 0;
-      setOffset(0);
+      placeSleeve(0);
       setPresentation("full");
       if (upcoming.revealState === "SEALED" || upcoming.category !== "TRADING_CARD") {
         setRevealPhase("SEALED");
@@ -550,28 +543,23 @@ export function RevealScreen() {
   const sleeveVisible = phase === "SEALED" || phase === "DRAGGING" || phase === "TEARING";
   const fastSlot = !reduced && cursor >= 2 && phase === "SEALED" && !settling;
   const reducedOpen = reduced && phase === "SEALED" && !settling;
-  const motion = revealMotion(reduced);
   const spokenCard = revealed && card ? cardAnnouncement(card) : null;
 
   useEffect(() => {
     if (!reduced || sleeveVisible) {
-      setFade(1);
+      cardFade.setValue(1);
       return;
     }
-    const fadeMs = revealMotion(true).fadeMs;
-    setFade(0);
-    const started = Date.now();
-    let frame = 0;
-    const tick = () => {
-      const t = Math.min(1, (Date.now() - started) / fadeMs);
-      setFade(t);
-      if (t < 1) {
-        frame = requestAnimationFrame(tick);
-      }
-    };
-    frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
-  }, [reduced, sleeveVisible, phase, cursor]);
+    cardFade.setValue(0);
+    const fade = Animated.timing(cardFade, {
+      toValue: 1,
+      duration: revealMotion(true).fadeMs,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    });
+    fade.start();
+    return () => fade.stop();
+  }, [cardFade, reduced, sleeveVisible, phase, cursor]);
 
   useEffect(() => {
     if (!spokenCard) {
@@ -656,25 +644,23 @@ export function RevealScreen() {
               <Text style={styles.status}>{statusCopy(phase, settling, reduced)}</Text>
               <View style={styles.stage}>
                 {sleeveVisible ? (
-                  <View
+                  <Animated.View
                     accessibilityLabel={reduced ? "Sealed pack. Reveal next card." : "Sealed pack. Drag down to tear it open."}
-                    style={[styles.sleeve, reduced ? null : { transform: [{ translateY: offset }] }]}
+                    style={[styles.sleeve, reduced ? null : { transform: [{ translateY: dragY }] }]}
                     {...(reduced ? {} : pan.panHandlers)}
                   >
                     <Text style={styles.brand}>GRAILHAUS</Text>
                     <Text style={styles.tier}>{loaded.tier}</Text>
                     <Text style={styles.hint}>{reduced ? "Reveal next card" : "Drag down"}</Text>
-                  </View>
+                  </Animated.View>
                 ) : (
-                  <View
+                  <Animated.View
                     accessibilityLabel={spokenCard ?? undefined}
                     accessibilityLiveRegion={spokenCard ? "polite" : "none"}
                     style={[
                       styles.face,
                       anticipating ? styles.faceRare : null,
-                      reduced
-                        ? { opacity: fade, transform: [{ scale: motion.scaleFrom + (1 - motion.scaleFrom) * fade }] }
-                        : null,
+                      reduced ? { opacity: cardFade, transform: [{ scale: cardScale }] } : null,
                     ]}
                   >
                     {anticipating ? <Text style={styles.hold}>Hold on.</Text> : null}
@@ -687,7 +673,7 @@ export function RevealScreen() {
                     ) : (
                       <Text style={styles.hold}>{anticipating ? "" : "Opening."}</Text>
                     )}
-                  </View>
+                  </Animated.View>
                 )}
               </View>
               {pulls.length > 0 ? <Fan pulls={pulls} /> : null}

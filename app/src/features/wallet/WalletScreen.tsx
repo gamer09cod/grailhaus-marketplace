@@ -25,6 +25,7 @@ import {
   submitDeposit,
 } from "../../api/deposit";
 import { loadCatalogSummary } from "../../api/catalog";
+import { watchTables } from "../../api/live";
 import { supabase } from "../../api/supabase";
 import { dollarsToCents, formatCents } from "../../utils/money";
 import { useAuth } from "../auth/AuthProvider";
@@ -69,16 +70,17 @@ export function WalletScreen() {
         void queryClient.invalidateQueries({ queryKey: ["catalog-summary", userId] });
       }
     });
-    const channel = supabase
-      .channel(`wallet-${userId}`)
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "wallets", filter: `user_id=eq.${userId}` }, () => {
+    const stop = watchTables(
+      "wallet",
+      [{ table: "wallets", event: "UPDATE", filter: `user_id=eq.${userId}` }],
+      () => {
         void queryClient.invalidateQueries({ queryKey: ["wallet", userId] });
-      })
-      .subscribe();
+      },
+    );
     return () => {
       network();
       appState.remove();
-      void supabase.removeChannel(channel);
+      stop();
     };
   }, [queryClient, userId]);
 

@@ -15,7 +15,7 @@ import {
 } from "react-native";
 
 import { CartRejected, CartUnknown, submitCart } from "../../api/cart";
-import { supabase } from "../../api/supabase";
+import { watchTables } from "../../api/live";
 import type { AppStackParamList } from "../../navigation/types";
 import { formatCents } from "../../utils/money";
 import { secondsUntil } from "../cart/countdown";
@@ -44,7 +44,6 @@ export function PackDetailScreen() {
   const [reserveUnknown, setReserveUnknown] = useState(false);
   const reserveKey = useRef<string | null>(null);
   const boundaryKey = useRef<string | null>(null);
-  const [nowMs, setNowMs] = useState(() => Date.now());
   const packs = useQuery({
     queryKey: ["shelf-packs"],
     queryFn: loadShelfPacks,
@@ -96,19 +95,13 @@ export function PackDetailScreen() {
         refreshDrops();
       }
     });
-    const channel = supabase
-      .channel(`drop-detail-${route.params.packId}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "pack_skus" }, () => {
-        refreshDrops();
-        void queryClient.invalidateQueries({ queryKey: ["shelf-packs"] });
-      })
-      .on("postgres_changes", { event: "*", schema: "public", table: "drops" }, () => {
-        refreshDrops();
-      })
-      .subscribe();
+    const stop = watchTables("drop-detail", [{ table: "pack_skus" }, { table: "drops" }], () => {
+      refreshDrops();
+      void queryClient.invalidateQueries({ queryKey: ["shelf-packs"] });
+    });
     return () => {
       appState.remove();
-      void supabase.removeChannel(channel);
+      stop();
     };
   }, [queryClient, refreshDrops, route.params.packId]);
 
@@ -118,7 +111,6 @@ export function PackDetailScreen() {
     }
     const timer = setInterval(() => {
       const nextNow = Date.now();
-      setNowMs(nextNow);
       const target = drop.status === "UPCOMING" ? drop.startsAt : drop.status === "LIVE" ? drop.endsAt : null;
       if (
         target
@@ -209,7 +201,7 @@ export function PackDetailScreen() {
             {formatCents(pack.priceCents)}
           </Text>
           {pack.drop && drops.data ? (
-            <DropStatusText board={drops.data} drop={pack.drop} nowMs={nowMs} />
+            <DropStatusText board={drops.data} drop={pack.drop} />
           ) : (
             <Text style={styles.availability}>{stockLabel(pack.reservable)}</Text>
           )}

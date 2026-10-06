@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -7,15 +7,15 @@ import {
   ActivityIndicator,
   AppState,
   Pressable,
+  FlatList,
   RefreshControl,
-  ScrollView,
   StyleSheet,
   Text,
   View,
 } from "react-native";
 
 import { CartRejected, CartUnknown, submitCart } from "../../api/cart";
-import { supabase } from "../../api/supabase";
+import { watchTables } from "../../api/live";
 import type { AppStackParamList } from "../../navigation/types";
 import { formatCents } from "../../utils/money";
 import { categoryLabel } from "../shelf/packs";
@@ -52,19 +52,14 @@ export function MarketScreen() {
         refresh();
       }
     });
-    const channel = supabase
-      .channel("market-listings")
-      .on("postgres_changes", { event: "*", schema: "public", table: "marketplace_listings" }, () => {
-        refresh();
-      })
-      .subscribe();
+    const stop = watchTables("market-listings", [{ table: "marketplace_listings" }], refresh);
     return () => {
       appState.remove();
-      void supabase.removeChannel(channel);
+      stop();
     };
   }, [refresh]);
 
-  function addListing(listing: MarketListing, remember: boolean) {
+  const addListing = useCallback((listing: MarketListing, remember: boolean) => {
     if (!online || listing.isOwn || pendingId) {
       return;
     }
@@ -96,20 +91,11 @@ export function MarketScreen() {
     }).finally(() => {
       setPendingId(null);
     });
-  }
+  }, [navigation, online, pendingId, queryClient]);
 
-  return (
-    <ScrollView
-      contentContainerStyle={styles.content}
-      refreshControl={
-        <RefreshControl
-          refreshing={market.isRefetching && !market.isLoading}
-          tintColor="#e4c07a"
-          onRefresh={() => void market.refetch()}
-        />
-      }
-      style={styles.screen}
-    >
+  const listings = market.data ?? [];
+  const header = useMemo(() => (
+    <View>
       <Pressable onPress={() => navigation.navigate("Shelf")}>
         <Text style={styles.link}>Shelf</Text>
       </Pressable>
@@ -136,42 +122,88 @@ export function MarketScreen() {
         <Text style={styles.notice}>No listings are for sale.</Text>
       ) : null}
       {notice ? <Text style={styles.notice}>{notice}</Text> : null}
-      {market.data?.map((listing) => (
-        <View key={listing.listingId} style={styles.card}>
-          <Text style={styles.category}>{categoryLabel(listing.category)}</Text>
-          <Text style={styles.name}>{listing.name}</Text>
-          <Text style={styles.meta}>{listing.rarity}</Text>
-          <Text style={styles.price}>{formatCents(listing.priceCents)}</Text>
-          <Text style={styles.meta}>Seller {listing.sellerUsername}</Text>
-          {listing.isOwn ? (
-            <Text style={styles.meta}>Your listing</Text>
-          ) : (
-            <Pressable
-              disabled={!online || pendingId !== null || unknown}
-              style={[styles.primary, (!online || pendingId !== null || unknown) && styles.disabled]}
-              onPress={() => addListing(listing, true)}
-            >
-              <Text style={styles.primaryLabel}>{pendingId === listing.listingId ? "Adding…" : "Add to cart"}</Text>
-            </Pressable>
-          )}
-        </View>
-      ))}
-      {unknown ? (
-        <Pressable
-          style={styles.primary}
-          onPress={() => {
-            const listing = market.data?.find((candidate) => candidate.listingId === pendingListing.current);
-            if (listing) {
-              addListing(listing, false);
-            }
-          }}
-        >
-          <Text style={styles.primaryLabel}>Check again</Text>
-        </Pressable>
-      ) : null}
-    </ScrollView>
+    </View>
+  ), [market.data, market.isError, market.isLoading, navigation, notice, online]);
+
+  const footer = unknown ? (
+    <Pressable
+      style={styles.primary}
+      onPress={() => {
+        const listing = market.data?.find((candidate) => candidate.listingId === pendingListing.current);
+        if (listing) {
+          addListing(listing, false);
+        }
+      }}
+    >
+      <Text style={styles.primaryLabel}>Check again</Text>
+    </Pressable>
+  ) : null;
+
+  const renderListing = useCallback(({ item }: { item: MarketListing }) => (
+    <MarketRow
+      adding={pendingId === item.listingId}
+      disabled={!online || pendingId !== null || unknown}
+      listing={item}
+      onAdd={addListing}
+    />
+  ), [addListing, online, pendingId, unknown]);
+
+  return (
+    <FlatList
+      contentContainerStyle={styles.content}
+      data={listings}
+      extraData={`${pendingId ?? ""}:${online}:${unknown}`}
+      initialNumToRender={8}
+      keyExtractor={(listing) => listing.listingId}
+      ListFooterComponent={footer}
+      ListHeaderComponent={header}
+      maxToRenderPerBatch={8}
+      refreshControl={
+        <RefreshControl
+          refreshing={market.isRefetching && !market.isLoading}
+          tintColor="#e4c07a"
+          onRefresh={() => void market.refetch()}
+        />
+      }
+      renderItem={renderListing}
+      style={styles.screen}
+      windowSize={7}
+    />
   );
 }
+
+const MarketRow = memo(function MarketRow({
+  listing,
+  adding,
+  disabled,
+  onAdd,
+}: {
+  listing: MarketListing;
+  adding: boolean;
+  disabled: boolean;
+  onAdd: (listing: MarketListing, remember: boolean) => void;
+}) {
+  return (
+    <View style={styles.card}>
+      <Text style={styles.category}>{categoryLabel(listing.category)}</Text>
+      <Text style={styles.name}>{listing.name}</Text>
+      <Text style={styles.meta}>{listing.rarity}</Text>
+      <Text style={styles.price}>{formatCents(listing.priceCents)}</Text>
+      <Text style={styles.meta}>Seller {listing.sellerUsername}</Text>
+      {listing.isOwn ? (
+        <Text style={styles.meta}>Your listing</Text>
+      ) : (
+        <Pressable
+          disabled={disabled}
+          style={[styles.primary, disabled && styles.disabled]}
+          onPress={() => onAdd(listing, true)}
+        >
+          <Text style={styles.primaryLabel}>{adding ? "Adding…" : "Add to cart"}</Text>
+        </Pressable>
+      )}
+    </View>
+  );
+});
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: "#12110f" },

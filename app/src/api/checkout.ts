@@ -1,6 +1,17 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
+
 import { supabase } from "./supabase";
 import { supabaseAnonKey, supabaseUrl } from "./config";
 import { centsFromWire } from "../utils/money";
+
+const inflightKey = "grailhaus.checkout.inflight";
+
+export type InflightCheckout = {
+  cartId: string;
+  idempotencyKey: string;
+  expectedTotalCents: string;
+  lines: { lineId: string; quantity: number; snapshotPriceCents: string }[];
+};
 
 export type CheckoutLine = {
   lineId: string;
@@ -33,6 +44,52 @@ export class CheckoutUnknown extends Error {
     super("Your order may have completed. We're checking before retrying.");
     this.name = "CheckoutUnknown";
   }
+}
+
+export async function readInflightCheckout(): Promise<InflightCheckout | null> {
+  const raw = await AsyncStorage.getItem(inflightKey);
+  if (!raw) {
+    return null;
+  }
+  const parsed: unknown = JSON.parse(raw);
+  if (!isInflightCheckout(parsed)) {
+    await AsyncStorage.removeItem(inflightKey);
+    return null;
+  }
+  return parsed;
+}
+
+export async function rememberInflightCheckout(checkout: InflightCheckout): Promise<void> {
+  await AsyncStorage.setItem(inflightKey, JSON.stringify(checkout));
+}
+
+export async function clearInflightCheckout(): Promise<void> {
+  await AsyncStorage.removeItem(inflightKey);
+}
+
+export function isInflightCheckout(value: unknown): value is InflightCheckout {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const record = value as {
+    cartId?: unknown;
+    idempotencyKey?: unknown;
+    expectedTotalCents?: unknown;
+    lines?: unknown;
+  };
+  return typeof record.cartId === "string"
+    && typeof record.idempotencyKey === "string"
+    && typeof record.expectedTotalCents === "string"
+    && Array.isArray(record.lines)
+    && record.lines.every((line) => {
+      if (typeof line !== "object" || line === null) {
+        return false;
+      }
+      const row = line as { lineId?: unknown; quantity?: unknown; snapshotPriceCents?: unknown };
+      return typeof row.lineId === "string"
+        && typeof row.quantity === "number"
+        && typeof row.snapshotPriceCents === "string";
+    });
 }
 
 export async function submitCheckout(input: {

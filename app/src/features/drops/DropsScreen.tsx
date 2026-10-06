@@ -13,7 +13,7 @@ import {
   View,
 } from "react-native";
 
-import { supabase } from "../../api/supabase";
+import { watchTables } from "../../api/live";
 import type { AppStackParamList } from "../../navigation/types";
 import { formatCents } from "../../utils/money";
 import { clockLabel, secondsUntil } from "../cart/countdown";
@@ -25,7 +25,6 @@ export function DropsScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<AppStackParamList>>();
   const queryClient = useQueryClient();
   const online = useOnline();
-  const [nowMs, setNowMs] = useState(() => Date.now());
   const boundaryKey = useRef<string | null>(null);
   const board = useQuery({
     queryKey: ["drop-board"],
@@ -48,25 +47,16 @@ export function DropsScreen() {
         refresh();
       }
     });
-    const channel = supabase
-      .channel("drop-stock")
-      .on("postgres_changes", { event: "*", schema: "public", table: "pack_skus" }, () => {
-        refresh();
-      })
-      .on("postgres_changes", { event: "*", schema: "public", table: "drops" }, () => {
-        refresh();
-      })
-      .subscribe();
+    const stop = watchTables("drop-stock", [{ table: "pack_skus" }, { table: "drops" }], refresh);
     return () => {
       appState.remove();
-      void supabase.removeChannel(channel);
+      stop();
     };
   }, [refresh]);
 
   useEffect(() => {
     const timer = setInterval(() => {
       const nextNow = Date.now();
-      setNowMs(nextNow);
       if (board.data && boundaryReached(board.data, nextNow) && boundaryKey.current !== board.data.serverNow) {
         boundaryKey.current = board.data.serverNow;
         refresh();
@@ -120,7 +110,7 @@ export function DropsScreen() {
           <Text style={styles.category}>{categoryLabel(drop.category)}</Text>
           <Text style={styles.name}>{drop.name}</Text>
           <Text style={styles.meta}>{drop.tier} · {formatCents(drop.priceCents)}</Text>
-          <DropStatusText board={board.data} drop={drop} nowMs={nowMs} />
+          <DropStatusText board={board.data} drop={drop} />
         </Pressable>
       ))}
     </ScrollView>
@@ -130,12 +120,18 @@ export function DropsScreen() {
 export function DropStatusText({
   board,
   drop,
-  nowMs,
 }: {
   board: DropBoard;
   drop: TimedDrop;
-  nowMs: number;
 }) {
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    if (drop.status !== "UPCOMING") {
+      return;
+    }
+    const timer = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [drop.status]);
   if (drop.status === "UPCOMING") {
     const label = clockLabel(secondsUntil(drop.startsAt, board.serverNow, board.fetchedAtMs, nowMs));
     return <Text style={styles.live}>Starts in {label}</Text>;

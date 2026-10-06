@@ -2,7 +2,8 @@
   "name": "grailhaus-marketplace",
   "private": true,
   "scripts": {
-    "hammer": "tsx scripts/hammer.ts"
+    "hammer": "tsx scripts/hammer.ts",
+    "apk": "node scripts/build-apk.mjs"
   },
   "devDependencies": {
     "@types/pg": "^8.15.4",
