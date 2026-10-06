@@ -12,6 +12,7 @@ import { MarketScreen } from "../features/market/MarketScreen";
 import { CategoryScreen } from "../features/shelf/CategoryScreen";
 import { PackDetailScreen } from "../features/shelf/PackDetailScreen";
 import { ShelfScreen } from "../features/shelf/ShelfScreen";
+import { AdminScreen } from "../features/admin/AdminScreen";
 import { QaScreen } from "../features/qa/QaScreen";
 import { RevealScreen } from "../features/reveal/RevealScreen";
 import { WalletScreen } from "../features/wallet/WalletScreen";
@@ -61,6 +62,7 @@ export function RootNavigator() {
           <AppStack.Screen name="Collection" component={CollectionScreen} />
           <AppStack.Screen name="Listing" component={ListingScreen} />
           <AppStack.Screen name="Qa" component={QaScreen} />
+          <AppStack.Screen name="Admin" component={AdminScreen} />
           <AppStack.Screen name="Reveal" component={RevealScreen} />
         </AppStack.Navigator>
       ) : (

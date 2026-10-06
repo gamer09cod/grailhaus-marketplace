@@ -172,6 +172,9 @@ export function WalletScreen() {
           <Pressable onPress={() => navigation.navigate("Shelf")}>
             <Text style={styles.signOut}>Shelf</Text>
           </Pressable>
+          <Pressable onPress={() => navigation.navigate("Admin")}>
+            <Text style={styles.signOut}>Admin</Text>
+          </Pressable>
           <Pressable onPress={() => void supabase.auth.signOut()}>
             <Text style={styles.signOut}>Sign out</Text>
           </Pressable>
