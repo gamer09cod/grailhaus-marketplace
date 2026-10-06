@@ -181,7 +181,7 @@ export function CartScreen() {
       payment.current = null;
       setAwaitingPayment(false);
       setOpenPackIds([]);
-      setNotice(error instanceof CheckoutRejected ? error.message : "The payment was rejected.");
+      setNotice(checkoutNotice(error));
       void queryClient.invalidateQueries({ queryKey: ["cart"] });
       void queryClient.invalidateQueries({ queryKey: ["shelf-packs"] });
     } finally {
@@ -219,12 +219,17 @@ export function CartScreen() {
       }
       style={styles.screen}
     >
-      <Pressable onPress={() => navigation.navigate("Shelf")}>
-        <Text style={styles.link}>Shelf</Text>
-      </Pressable>
+      <View style={styles.headerLinks}>
+        <Pressable onPress={() => navigation.navigate("Shelf")}>
+          <Text style={styles.link}>Shelf</Text>
+        </Pressable>
+        <Pressable onPress={() => navigation.navigate("Market")}>
+          <Text style={styles.link}>Market</Text>
+        </Pressable>
+      </View>
       <Text style={styles.title}>Cart</Text>
       {!online ? (
-        <Text style={styles.notice}>You're offline. Reservations stay disabled until the connection returns.</Text>
+        <Text style={styles.notice}>You're offline. This cart may be out of date. Reservations stay disabled until the connection returns.</Text>
       ) : null}
       {cart.isLoading ? (
         <View>
@@ -241,7 +246,7 @@ export function CartScreen() {
         </View>
       ) : null}
       {cart.data && cart.data.lines.length === 0 ? (
-        <Text style={styles.notice}>Your cart is empty.</Text>
+        <Text style={styles.notice}>Your cart is empty.{"\n\n"}Browse the shelf or the market.</Text>
       ) : null}
       {notice ? <Text style={styles.notice}>{notice}</Text> : null}
       {openPackIds.length > 0 ? (
@@ -302,6 +307,7 @@ export function CartScreen() {
           onAccept={() => startLineAction(line, line.lineType === "PACK" ? "acceptPrice" : "acceptListingPrice")}
           onRemove={() => startLineAction(line, "release")}
           onRetry={() => startLineAction(line, "retry")}
+          onBrowseMarket={() => navigation.navigate("Market")}
         />
       ))}
     </ScrollView>
@@ -317,6 +323,7 @@ function CartLineCard({
   onAccept,
   onRemove,
   onRetry,
+  onBrowseMarket,
 }: {
   line: CartLine;
   snapshot: CartSnapshot;
@@ -326,6 +333,7 @@ function CartLineCard({
   onAccept: () => void;
   onRemove: () => void;
   onRetry: () => void;
+  onBrowseMarket: () => void;
 }) {
   if (line.lineType === "MARKETPLACE_LISTING") {
     return (
@@ -344,8 +352,20 @@ function CartLineCard({
             <ActionButton disabled={disabled} label={busy ? "Confirming…" : "Accept New Price"} onPress={onAccept} />
           </View>
         ) : null}
-        {line.state === "LISTING_SOLD" ? <Text style={styles.warning}>This listing has been sold.</Text> : null}
-        {line.state === "LISTING_DELISTED" ? <Text style={styles.warning}>The seller removed this listing.</Text> : null}
+        {line.state === "LISTING_SOLD" ? (
+          <View>
+            <Text style={styles.warning}>This listing has already sold.</Text>
+            <Text style={styles.meta}>Browse similar listings or remove it from your cart.</Text>
+            <ActionButton disabled={false} label="Browse Marketplace" onPress={onBrowseMarket} />
+          </View>
+        ) : null}
+        {line.state === "LISTING_DELISTED" ? (
+          <View>
+            <Text style={styles.warning}>The seller removed this listing.</Text>
+            <Text style={styles.meta}>Remove it from your cart, or browse what is still for sale.</Text>
+            <ActionButton disabled={false} label="Browse Marketplace" onPress={onBrowseMarket} />
+          </View>
+        ) : null}
         <Pressable disabled={disabled} onPress={onRemove}>
           <Text style={[styles.remove, disabled && styles.disabled]}>{busy ? "Removing…" : "Remove"}</Text>
         </Pressable>
@@ -383,10 +403,12 @@ function CartLineCard({
       ) : null}
       {line.state === "PARTIALLY_AVAILABLE" ? (
         <Text style={styles.warning}>
-          Only {line.availableQuantity.toString()} are available. This line is unchanged.
+          Only {line.availableQuantity.toString()} are available. This line is unchanged.{"\n\n"}Remove it, then reserve {line.availableQuantity.toString()} from the shelf.
         </Text>
       ) : null}
-      {line.state === "SOLD_OUT" ? <Text style={styles.warning}>Sold out</Text> : null}
+      {line.state === "SOLD_OUT" ? (
+        <Text style={styles.warning}>That pack is sold out.{"\n\n"}Remove it from your cart.</Text>
+      ) : null}
       <Pressable disabled={disabled} onPress={onRemove}>
         <Text style={[styles.remove, disabled && styles.disabled]}>{busy ? "Removing…" : "Remove"}</Text>
       </Pressable>
@@ -439,6 +461,34 @@ function payableTotal(lines: CartLine[]): bigint | null {
   return total;
 }
 
+function checkoutNotice(error: unknown): string {
+  if (!(error instanceof CheckoutRejected)) {
+    return "The payment did not go through.\n\nReview your cart and try again.";
+  }
+  if (error.code === "LISTING_SOLD") {
+    return "This listing has already sold.\n\nBrowse similar listings or remove it from your cart.";
+  }
+  if (error.code === "LISTING_DELISTED") {
+    return "The seller removed this listing.\n\nRemove it from your cart.";
+  }
+  if (error.code === "LISTING_PRICE_CHANGED" || error.code === "CART_CHANGED" || error.code === "CHECKOUT_TOTAL_CHANGED") {
+    return "Your cart changed\n\nSome items are no longer available or their price changed.\nReview your cart before paying.";
+  }
+  if (error.code === "SOLD_OUT") {
+    return "That pack is sold out.\n\nRemove it from your cart.";
+  }
+  if (error.code === "RESERVATION_EXPIRED") {
+    return "Reservation expired\n\nThese packs are no longer reserved.";
+  }
+  if (error.code === "INSUFFICIENT_BALANCE") {
+    return "You do not have enough in your wallet.\n\nAdd funds, then pay again.";
+  }
+  if (error.code === "INSUFFICIENT_STOCK") {
+    return "Not enough packs are available.\n\nRemove the line and reserve what remains.";
+  }
+  return error.message;
+}
+
 function messageFor(error: unknown): string {
   if (error instanceof CartUnknown) {
     return "Confirming reservation…\n\nThis hold may have completed.\nWe're checking before retrying.";
@@ -452,6 +502,7 @@ function messageFor(error: unknown): string {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: "#12110f" },
   content: { padding: 24, paddingTop: 48, paddingBottom: 48 },
+  headerLinks: { flexDirection: "row", gap: 16 },
   link: { color: "#e4c07a" },
   title: { color: "#f4efe6", fontSize: 28, fontWeight: "600", marginTop: 16, marginBottom: 8 },
   notice: { color: "#c9bfb2", lineHeight: 20, marginTop: 12 },

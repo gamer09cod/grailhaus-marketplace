@@ -126,7 +126,7 @@ export function WalletScreen() {
       }
       await clearInflightDeposit();
       setAwaitingResult(false);
-      setNotice(error instanceof DepositRejected ? error.message : "The deposit was rejected.");
+      setNotice(error instanceof DepositRejected ? error.message : "The deposit did not go through. Check the amount and try again.");
     } finally {
       setConfirming(false);
     }

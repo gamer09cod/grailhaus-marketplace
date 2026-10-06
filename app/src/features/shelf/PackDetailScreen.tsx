@@ -241,7 +241,7 @@ export function PackDetailScreen() {
           <View>
           <Text style={styles.section}>Quantity</Text>
           {quantity === 0 ? (
-            <Text style={styles.notice}>None available to select.</Text>
+            <Text style={styles.notice}>Sold out. None of these packs are left to reserve.</Text>
           ) : (
             <View>
               <View style={styles.stepper}>

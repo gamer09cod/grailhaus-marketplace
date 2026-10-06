@@ -35,7 +35,7 @@ export function AuthScreen() {
     setSubmitting(false);
 
     if (result.error) {
-      setMessage(result.error.message);
+      setMessage(authNotice(result.error.message, mode));
       return;
     }
 
@@ -89,6 +89,21 @@ export function AuthScreen() {
       </Pressable>
     </View>
   );
+}
+
+function authNotice(message: string, mode: Mode): string {
+  if (message === "Invalid login credentials") {
+    return "That email or password is wrong. Try again.";
+  }
+  if (message.toLowerCase().includes("already registered")) {
+    return "An account with that email already exists. Sign in instead.";
+  }
+  if (message === "Something went wrong" || message === "Error") {
+    return mode === "sign-in"
+      ? "Sign-in didn't finish. Check the connection and try again."
+      : "The account was not created. Check the connection and try again.";
+  }
+  return message;
 }
 
 const styles = StyleSheet.create({

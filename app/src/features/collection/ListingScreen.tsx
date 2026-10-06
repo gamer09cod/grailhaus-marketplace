@@ -94,7 +94,7 @@ export function ListingScreen() {
       }
       actionKey.current = null;
       setUnknown(false);
-      setNotice(error instanceof ListingRejected ? error.message : "The listing was rejected.");
+      setNotice(error instanceof ListingRejected ? error.message : "That listing change did not go through. Check the price and try again.");
     }).finally(() => {
       setSaving(false);
     });
@@ -108,7 +108,7 @@ export function ListingScreen() {
         <Text style={styles.link}>Back</Text>
       </Pressable>
       {!online ? (
-        <Text style={styles.notice}>You're offline. Listing, price changes, and delist stay disabled until the connection returns.</Text>
+        <Text style={styles.notice}>You're offline. This item may be out of date. Listing, price changes, and delist stay disabled until the connection returns.</Text>
       ) : null}
       {holdings.isLoading && !holding ? (
         <View>

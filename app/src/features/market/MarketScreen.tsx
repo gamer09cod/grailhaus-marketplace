@@ -92,7 +92,7 @@ export function MarketScreen() {
       }
       addKey.current = null;
       setUnknown(false);
-      setNotice(error instanceof CartRejected ? error.message : "The listing was not added.");
+      setNotice(error instanceof CartRejected ? error.message : "That listing was not added. Refresh the market and try again.");
     }).finally(() => {
       setPendingId(null);
     });
@@ -116,7 +116,7 @@ export function MarketScreen() {
       <Text style={styles.title}>Market</Text>
       <Text style={styles.notice}>Listings are not reserved. The seller can still change or remove one.</Text>
       {!online ? (
-        <Text style={styles.notice}>You're offline. Adding a listing stays disabled until the connection returns.</Text>
+        <Text style={styles.notice}>You're offline. These listings may be out of date. Adding a listing stays disabled until the connection returns.</Text>
       ) : null}
       {market.isLoading ? (
         <View>

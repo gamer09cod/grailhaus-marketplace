@@ -117,7 +117,7 @@ export function CollectionScreen() {
         setNotice("Removing the listing… This change may have completed. We're checking before retrying.");
         return;
       }
-      setNotice(error instanceof ListingRejected ? error.message : "The listing was rejected.");
+      setNotice(error instanceof ListingRejected ? error.message : "That listing change did not go through. Try it again.");
     } finally {
       setDelistingId(null);
     }
@@ -177,7 +177,7 @@ export function CollectionScreen() {
         ))}
       </View>
       {!online ? (
-        <Text style={styles.notice}>You're offline. Listing and delist stay disabled until the connection returns.</Text>
+        <Text style={styles.notice}>You're offline. This portfolio may be out of date. Listing and delist stay disabled until the connection returns.</Text>
       ) : null}
       {notice ? <Text style={styles.notice}>{notice}</Text> : null}
       {holdings.isLoading || sealed.isLoading ? (
@@ -213,7 +213,7 @@ export function CollectionScreen() {
         </Pressable>
       ))}
       {holdings.data && holdings.data.length === 0 && (sealed.data?.length ?? 0) === 0 ? (
-        <Text style={styles.notice}>You don't own any items yet.</Text>
+        <Text style={styles.notice}>You don't own any items yet.{"\n\n"}Open a pack from the shelf.</Text>
       ) : null}
       {holdings.data && holdings.data.length === 0 && (sealed.data?.length ?? 0) > 0 ? (
         <Text style={styles.notice}>Opened items show up here.</Text>
