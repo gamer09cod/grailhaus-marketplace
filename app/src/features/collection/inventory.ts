@@ -1,3 +1,4 @@
+import { applyPriceDrift } from "../../api/drift";
 import { supabase } from "../../api/supabase";
 import type { PackCategory } from "../../navigation/types";
 import { centsFromWire } from "../../utils/money";
@@ -18,6 +19,7 @@ export type OwnedHolding = {
 };
 
 export async function loadHoldings(): Promise<OwnedHolding[]> {
+  await applyPriceDrift();
   const { data, error } = await supabase
     .from("owned_items")
     .select(`

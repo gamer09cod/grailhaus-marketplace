@@ -1,5 +1,6 @@
 import * as Crypto from "expo-crypto";
 
+import { applyPriceDrift } from "./drift";
 import { centsFromWire } from "../utils/money";
 import { isPackCategory } from "../features/shelf/packs";
 import type { PackCategory } from "../navigation/types";
@@ -100,6 +101,7 @@ export async function loadRevealSession(seedIds: string[]): Promise<RevealPack[]
   if (seedIds.length === 0) {
     return [];
   }
+  await applyPriceDrift();
 
   const { data: seeds, error: seedError } = await supabase
     .from("purchased_packs")
@@ -139,6 +141,7 @@ export async function loadRevealSession(seedIds: string[]): Promise<RevealPack[]
 }
 
 export async function loadRevealPack(purchasedPackId: string): Promise<RevealPack | null> {
+  await applyPriceDrift();
   const { data, error } = await supabase
     .from("purchased_packs")
     .select(revealPackSelect)
