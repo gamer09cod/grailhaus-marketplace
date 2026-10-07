@@ -1,16 +1,14 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useFocusEffect, useNavigation, useRoute } from "@react-navigation/native";
 import type { RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AccessibilityInfo,
-  ActivityIndicator,
   Animated,
   AppState,
   Easing,
   PanResponder,
-  Pressable,
   StyleSheet,
   Text,
   View,
@@ -24,7 +22,15 @@ import {
   type RevealCard,
   type RevealPack,
 } from "../../api/reveal";
+import { AppHeader } from "../../components/AppHeader";
+import { CollectibleArt } from "../../components/CollectibleArt";
+import { ConnectivityBanner } from "../../components/ConnectivityBanner";
+import { ErrorState } from "../../components/ErrorState";
+import { InlineStatusCard } from "../../components/InlineStatusCard";
+import { RevealLoadSkeleton } from "../../components/Skeleton";
+import { PrimaryButton, TertiaryButton } from "../../components/buttons";
 import type { AppStackParamList } from "../../navigation/types";
+import { colors, glow, layout, maxFontScale, radius, shadows, spacing, typography, type RarityKey } from "../../theme";
 import { formatCents } from "../../utils/money";
 import { useOnline } from "../shelf/useOnline";
 import {
@@ -32,12 +38,21 @@ import {
   nextCardLabel,
   revealMotion,
   sealedDirection,
+  spokenRarity,
   summaryAnnouncement,
 } from "./access";
 import { loadHapticsEnabled, playHaptic, playRarityHaptic, saveHapticsEnabled } from "./haptics";
 import { bestPull, fanInOpenOrder, openMode, packsOpenedLabel, sumCents, type OpenMode } from "./pacing";
 import { backgroundDuringTear, recoveryCursor, recoveryShowsCard } from "./recovery";
 import { anticipationMs, decideTear, isHighRarity, velocityPxPerMs } from "./tear";
+
+const rareDots: { top?: number; bottom?: number; left?: number; right?: number; size: number }[] = [
+  { top: 28, left: 36, size: 4 },
+  { top: 64, right: 42, size: 3 },
+  { top: 120, left: 28, size: 5 },
+  { bottom: 88, right: 30, size: 3 },
+  { bottom: 48, left: 48, size: 4 },
+];
 
 type RevealPhase = "SEALED" | "DRAGGING" | "TEARING" | "OPEN" | "REVEALING_CARD" | "CARD_REVEALED" | "PACK_COMPLETE";
 
@@ -63,9 +78,16 @@ export function RevealScreen() {
   const [notice, setNotice] = useState<string | null>(null);
   const [working, setWorking] = useState(false);
 
-  const dragY = useRef(new Animated.Value(0)).current;
-  const cardFade = useRef(new Animated.Value(1)).current;
-  const cardScale = useRef(cardFade.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1] })).current;
+  const dragY = useMemo(() => new Animated.Value(0), []);
+  const cardFade = useMemo(() => new Animated.Value(1), []);
+  const cardScale = useMemo(
+    () => cardFade.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1] }),
+    [cardFade],
+  );
+  const ambientOpacity = useMemo(
+    () => dragY.interpolate({ inputRange: [0, 48, 200], outputRange: [0.14, 0.22, 0.34], extrapolate: "clamp" }),
+    [dragY],
+  );
   const phaseRef = useRef<RevealPhase>("SEALED");
   const offsetRef = useRef(0);
   const settlingRef = useRef(false);
@@ -84,7 +106,7 @@ export function RevealScreen() {
   const packRef = useRef<RevealPack | null>(null);
   const mounted = useRef(true);
 
-  const packs = session.data ?? [];
+  const packs = useMemo(() => session.data ?? [], [session.data]);
   const loaded = packs[cursor] ?? null;
 
   useEffect(() => {
@@ -250,6 +272,7 @@ export function RevealScreen() {
     packsRef.current = loadedPacks;
     const first = recoveryCursor(loadedPacks.map((pack) => pack.revealState));
     if (first === "summary") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time recovery when session loads
       setSummary(true);
       return;
     }
@@ -415,8 +438,10 @@ export function RevealScreen() {
     springRef.current = springShut;
   }, [commitTear, springShut]);
 
-  const pan = useRef(
-    PanResponder.create({
+  /* Gesture handlers close over refs and sample Date.now only on touch events. */
+  /* eslint-disable react-hooks/refs, react-hooks/purity -- PanResponder event callbacks */
+  const panHandlers = useMemo(
+    () => PanResponder.create({
       onStartShouldSetPanResponder: () =>
         !reducedRef.current && phaseRef.current === "SEALED" && !settlingRef.current && !workingRef.current,
       onMoveShouldSetPanResponder: () =>
@@ -482,8 +507,10 @@ export function RevealScreen() {
           springRef.current(offsetRef.current);
         }
       },
-    }),
-  ).current;
+    }).panHandlers,
+    [placeSleeve],
+  );
+  /* eslint-enable react-hooks/refs, react-hooks/purity */
 
   async function finishPack() {
     const current = packRef.current;
@@ -572,86 +599,109 @@ export function RevealScreen() {
   const estimated = sumCents(packs.flatMap((pack) => pack.cards.map((item) => item.estimatedValueCents)));
   const best = bestPull(packs.flatMap((pack) => pack.cards));
 
+  const toPortfolio = () => navigation.navigate("Tabs", { screen: "Portfolio" });
+
+  const categoryTone = colors.category.TRADING_CARD;
+  const rarityTone = rarityColor(card?.rarity);
+
   return (
-    <View style={styles.screen}>
-      <Pressable onPress={() => navigation.navigate("Collection")}>
-        <Text style={styles.link}>Collection</Text>
-      </Pressable>
+    <RevealFrame onClose={toPortfolio}>
       {summary ? (
         <View
           accessibilityLabel={summaryAnnouncement(packs.length, spent, estimated, best?.name ?? "None")}
+          style={styles.summary}
         >
-          <Text style={styles.title}>{packsOpenedLabel(packs.length)}</Text>
-          <Text style={styles.notice}>Total spent</Text>
-          <Text style={styles.amount}>{formatCents(spent)}</Text>
-          <Text style={styles.notice}>Estimated value</Text>
-          <Text style={styles.amount}>{formatCents(estimated)}</Text>
-          <Text style={styles.notice}>Best pull</Text>
-          <Text style={styles.amount}>{best?.name ?? "None"}</Text>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="View Portfolio"
-            style={styles.primary}
-            onPress={() => navigation.navigate("Collection")}
-          >
-            <Text style={styles.primaryLabel}>View Portfolio</Text>
-          </Pressable>
+          <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.kicker}>Session</Text>
+          <Text maxFontSizeMultiplier={maxFontScale.display} style={styles.title}>{packsOpenedLabel(packs.length)}</Text>
+          <View style={styles.summaryRow}>
+            <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.summaryLabel}>Total spent</Text>
+            <Text maxFontSizeMultiplier={maxFontScale.display} style={styles.summaryValue}>{formatCents(spent)}</Text>
+          </View>
+          <View style={styles.summaryRow}>
+            <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.summaryLabel}>Collection value</Text>
+            <Text maxFontSizeMultiplier={maxFontScale.display} style={styles.summaryValue}>{formatCents(estimated)}</Text>
+          </View>
+          <View style={styles.summaryBest}>
+            <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.kicker}>Best pull</Text>
+            <Text maxFontSizeMultiplier={maxFontScale.display} style={styles.bestName}>{best?.name ?? "None"}</Text>
+            {best ? (
+              <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.bestValue}>
+                {spokenRarity(best.rarity)} · {formatCents(best.estimatedValueCents)}
+              </Text>
+            ) : null}
+          </View>
+          <PrimaryButton fullWidth label="View Portfolio" onPress={toPortfolio} />
         </View>
       ) : (
-        <View>
+        <View style={styles.column}>
           <View style={styles.header}>
-            <Text style={styles.title}>{loaded?.name ?? "Pack"}</Text>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={hapticsOn ? "Haptics on" : "Haptics off"}
+            <View style={styles.headerCopy}>
+              <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.kicker}>Reveal</Text>
+              <Text maxFontSizeMultiplier={maxFontScale.display} numberOfLines={1} style={styles.title}>
+                {loaded?.name ?? "Pack"}
+              </Text>
+            </View>
+            <TertiaryButton
               accessibilityHint="The card name, rarity, and value stay on screen."
+              accessibilityLabel={hapticsOn ? "Haptics on" : "Haptics off"}
+              label={hapticsOn ? "Haptics on" : "Haptics off"}
               onPress={() => void toggleHaptics()}
-            >
-              <Text style={styles.link}>{hapticsOn ? "Haptics on" : "Haptics off"}</Text>
-            </Pressable>
+            />
           </View>
-          {session.isLoading ? (
-            <View>
-              <ActivityIndicator color="#e4c07a" />
-              <Text style={styles.notice}>Loading the sealed pack…</Text>
-            </View>
-          ) : null}
+          {session.isLoading ? <RevealLoadSkeleton /> : null}
           {session.isError ? (
-            <View>
-              <Text style={styles.notice}>The pack didn't load. Check the connection and try again.</Text>
-              <Pressable style={styles.primary} onPress={() => void session.refetch()}>
-                <Text style={styles.primaryLabel}>Try again</Text>
-              </Pressable>
-            </View>
+            <ErrorState
+              body="Check the connection and try again."
+              retryVariant="primary"
+              title="The pack didn't load."
+              onRetry={() => void session.refetch()}
+            />
           ) : null}
           {session.data && packs.length === 0 ? (
-            <Text style={styles.notice}>That pack is not in your collection.</Text>
+            <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.notice}>That pack is not in your collection.</Text>
           ) : null}
           {loaded && loaded.category !== "TRADING_CARD" ? (
-            <View>
-              <Text style={styles.notice}>This pack is in your collection.</Text>
-              <Pressable style={styles.primary} onPress={() => navigation.navigate("Collection")}>
-                <Text style={styles.primaryLabel}>Collection</Text>
-              </Pressable>
+            <View style={styles.statusBlock}>
+              <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.notice}>This pack is in your collection.</Text>
+              <PrimaryButton label="View Portfolio" onPress={toPortfolio} />
             </View>
           ) : null}
           {loaded && loaded.category === "TRADING_CARD" ? (
-            <View>
-              {!online ? (
-                <Text style={styles.notice}>You're offline. The pack stays sealed until the connection returns.</Text>
+            <View style={styles.column}>
+              <ConnectivityBanner offlineDetail="The pack stays sealed until the connection returns." />
+              {packs.length > 1 ? (
+                <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.progress}>
+                  {`Pack ${cursor + 1} of ${packs.length}`}
+                </Text>
               ) : null}
-              {packs.length > 1 ? <Text style={styles.status}>{`Pack ${cursor + 1} of ${packs.length}`}</Text> : null}
-              <Text style={styles.status}>{statusCopy(phase, settling, reduced)}</Text>
+              <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.status}>
+                {statusCopy(phase, settling, reduced, presentation)}
+              </Text>
               <View style={styles.stage}>
+                <Animated.View
+                  pointerEvents="none"
+                  style={[
+                    styles.ambient,
+                    {
+                      backgroundColor: anticipating ? rarityTone.solid : categoryTone.solid,
+                      opacity: anticipating ? 0.28 : ambientOpacity,
+                      ...glow(anticipating ? rarityTone.solid : categoryTone.solid, anticipating ? 42 : 28),
+                    },
+                  ]}
+                />
+                {anticipating ? <RareSparkle color={rarityTone.solid} /> : null}
                 {sleeveVisible ? (
                   <Animated.View
                     accessibilityLabel={reduced ? "Sealed pack. Reveal next card." : "Sealed pack. Drag down to tear it open."}
                     style={[styles.sleeve, reduced ? null : { transform: [{ translateY: dragY }] }]}
-                    {...(reduced ? {} : pan.panHandlers)}
+                    {...(reduced ? {} : panHandlers)}
                   >
-                    <Text style={styles.brand}>GRAILHAUS</Text>
-                    <Text style={styles.tier}>{loaded.tier}</Text>
-                    <Text style={styles.hint}>{reduced ? "Reveal next card" : "Drag down"}</Text>
+                    <View style={[styles.sleeveEdge, { borderColor: categoryTone.border }]} />
+                    <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.brand}>GRAILHAUS</Text>
+                    <Text maxFontSizeMultiplier={maxFontScale.display} style={styles.tier}>{loaded.tier}</Text>
+                    <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.hint}>
+                      {reduced ? "Reveal next card" : "Drag down"}
+                    </Text>
                   </Animated.View>
                 ) : (
                   <Animated.View
@@ -659,88 +709,156 @@ export function RevealScreen() {
                     accessibilityLiveRegion={spokenCard ? "polite" : "none"}
                     style={[
                       styles.face,
-                      anticipating ? styles.faceRare : null,
+                      anticipating
+                        ? [styles.faceRare, { borderColor: rarityTone.solid }, glow(rarityTone.solid, 32)]
+                        : null,
                       reduced ? { opacity: cardFade, transform: [{ scale: cardScale }] } : null,
                     ]}
                   >
-                    {anticipating ? <Text style={styles.hold}>Hold on.</Text> : null}
+                    {anticipating ? (
+                      <Text maxFontSizeMultiplier={maxFontScale.body} style={[styles.hold, { color: rarityTone.solid }]}>
+                        Hold on.
+                      </Text>
+                    ) : null}
                     {revealed && card ? (
-                      <View>
-                        <Text style={styles.rarity}>{card.rarity}</Text>
-                        <Text style={styles.cardName}>{card.name}</Text>
-                        <Text style={styles.meta}>Estimated value {formatCents(card.estimatedValueCents)}</Text>
+                      <View style={styles.cardBody}>
+                        <CollectibleArt
+                          category="TRADING_CARD"
+                          height={120}
+                          style={styles.cardArt}
+                          title={card.name}
+                        />
+                        <Text
+                          maxFontSizeMultiplier={maxFontScale.body}
+                          style={[styles.rarity, { color: rarityTone.solid }]}
+                        >
+                          {spokenRarity(card.rarity)}
+                        </Text>
+                        <Text maxFontSizeMultiplier={maxFontScale.display} style={styles.cardName}>{card.name}</Text>
+                        <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.meta}>
+                          Estimated value {formatCents(card.estimatedValueCents)}
+                        </Text>
                       </View>
                     ) : (
-                      <Text style={styles.hold}>{anticipating ? "" : "Opening."}</Text>
+                      <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.hold}>
+                        {anticipating ? "" : "Opening."}
+                      </Text>
                     )}
                   </Animated.View>
                 )}
               </View>
               {pulls.length > 0 ? <Fan pulls={pulls} /> : null}
-              {fastSlot ? (
-                <Pressable
-                  accessibilityLabel="Fast Open"
-                  disabled={working || !online}
-                  style={[styles.primary, (working || !online) && styles.disabled]}
-                  onPress={() => void commitTear("fast")}
-                >
-                  <Text style={styles.primaryLabel}>Fast Open</Text>
-                </Pressable>
-              ) : null}
-              {reducedOpen ? (
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Reveal next card"
-                  disabled={working || !online}
-                  style={[styles.primary, (working || !online) && styles.disabled]}
-                  onPress={() => void commitTear("reduced")}
-                >
-                  <Text style={styles.primaryLabel}>Reveal next card</Text>
-                </Pressable>
-              ) : null}
-              {phase === "REVEALING_CARD" ? (
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Skip animation"
-                  onPress={() => {
-                    skipHold.current = true;
-                  }}
-                >
-                  <Text style={styles.link}>Skip animation</Text>
-                </Pressable>
-              ) : null}
-              {phase === "CARD_REVEALED" ? (
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={working ? "Saving" : nextCardLabel(cursor < packs.length - 1)}
-                  disabled={working || !online}
-                  style={[styles.primary, (working || !online) && styles.disabled]}
-                  onPress={() => void finishPack()}
-                >
-                  <Text style={styles.primaryLabel}>{working ? "Saving…" : nextCardLabel(cursor < packs.length - 1)}</Text>
-                </Pressable>
-              ) : null}
+              <View style={styles.actions}>
+                {fastSlot ? (
+                  <View style={styles.speedUp}>
+                    <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.speedUpTitle}>
+                      Speed up remaining packs?
+                    </Text>
+                    <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.speedUpBody}>
+                      {remainingPacksLabel(packs.length - cursor)} Quick tear, then a fan of cards already opened.
+                      Epic and legendary pulls still pause.
+                    </Text>
+                    <PrimaryButton
+                      disabled={working || !online}
+                      fullWidth
+                      label="Fast Open"
+                      loading={working}
+                      onPress={() => void commitTear("fast")}
+                    />
+                  </View>
+                ) : null}
+                {reducedOpen ? (
+                  <PrimaryButton
+                    disabled={working || !online}
+                    fullWidth
+                    label="Reveal next card"
+                    loading={working}
+                    onPress={() => void commitTear("reduced")}
+                  />
+                ) : null}
+                {phase === "REVEALING_CARD" ? (
+                  <TertiaryButton
+                    label="Skip animation"
+                    onPress={() => {
+                      skipHold.current = true;
+                    }}
+                  />
+                ) : null}
+                {phase === "CARD_REVEALED" ? (
+                  <PrimaryButton
+                    disabled={working || !online}
+                    fullWidth
+                    label={working ? "Saving…" : nextCardLabel(cursor < packs.length - 1)}
+                    loading={working}
+                    loadingLabel="Saving…"
+                    onPress={() => void finishPack()}
+                  />
+                ) : null}
+              </View>
               {phase === "PACK_COMPLETE" && packs.length < 2 ? (
-                <Text style={styles.notice}>This pack is open.</Text>
+                <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.notice}>This pack is open.</Text>
               ) : null}
             </View>
           ) : null}
-          {notice ? <Text style={styles.notice}>{notice}</Text> : null}
-          {notice && (phase === "OPEN" || phase === "REVEALING_CARD") ? (
-            <Pressable
-              style={styles.primary}
-              onPress={() => {
-                const current = packRef.current;
-                if (current) {
-                  void resume(current, phase);
-                }
-              }}
-            >
-              <Text style={styles.primaryLabel}>Try again</Text>
-            </Pressable>
+          {notice ? (
+            <InlineStatusCard
+              action={
+                phase === "OPEN" || phase === "REVEALING_CARD"
+                  ? {
+                      label: "Try again",
+                      variant: "primary",
+                      onPress: () => {
+                        const current = packRef.current;
+                        if (current) {
+                          void resume(current, phase);
+                        }
+                      },
+                    }
+                  : undefined
+              }
+              icon="alert-circle-outline"
+              title={notice}
+              tone="warning"
+            />
           ) : null}
         </View>
       )}
+    </RevealFrame>
+  );
+}
+
+function RevealFrame({ children, onClose }: { children: ReactNode; onClose: () => void }) {
+  return (
+    <View style={styles.screen}>
+      <View pointerEvents="none" style={styles.vignette} />
+      <AppHeader back={onClose} backKind="close" backLabel="Close and go to Portfolio" />
+      <View style={styles.body}>{children}</View>
+    </View>
+  );
+}
+
+function RareSparkle({ color }: { color: string }) {
+  return (
+    <View pointerEvents="none" style={styles.sparkleLayer}>
+      {rareDots.map((dot, index) => (
+        <View
+          key={index}
+          style={[
+            styles.sparkle,
+            {
+              backgroundColor: color,
+              width: dot.size,
+              height: dot.size,
+              borderRadius: dot.size,
+              top: dot.top,
+              bottom: dot.bottom,
+              left: dot.left,
+              right: dot.right,
+              opacity: 0.45 + (index % 3) * 0.12,
+            },
+          ]}
+        />
+      ))}
     </View>
   );
 }
@@ -748,22 +866,53 @@ export function RevealScreen() {
 function Fan({ pulls }: { pulls: RevealCard[] }) {
   const best = bestPull(pulls);
   return (
-    <View style={styles.fan}>
-      {pulls.map((pull, index) => {
-        const chosen = pull === best;
-        return (
-          <View
-            accessibilityLabel={chosen ? `Best. ${pull.name}` : pull.name}
-            key={`${pull.catalogItemId}-${index}`}
-            style={[styles.chip, chosen ? styles.chipBest : null]}
-          >
-            {chosen ? <Text style={styles.chipTag}>Best</Text> : null}
-            <Text numberOfLines={2} style={styles.chipName}>{pull.name}</Text>
-          </View>
-        );
-      })}
+    <View style={styles.fanBlock}>
+      <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.fanKicker}>Opened this session</Text>
+      <View style={styles.fan}>
+        {pulls.map((pull, index) => {
+          const chosen = pull === best;
+          const tone = rarityColor(pull.rarity);
+          return (
+            <View
+              accessibilityLabel={
+                chosen
+                  ? `Best. ${pull.name}. ${spokenRarity(pull.rarity)}. ${formatCents(pull.estimatedValueCents)}`
+                  : `${pull.name}. ${spokenRarity(pull.rarity)}. ${formatCents(pull.estimatedValueCents)}`
+              }
+              key={`${pull.catalogItemId}-${index}`}
+              style={[styles.chip, chosen ? [styles.chipBest, { borderColor: tone.solid }] : null]}
+            >
+              {chosen ? (
+                <Text maxFontSizeMultiplier={maxFontScale.body} style={[styles.chipTag, { color: tone.solid }]}>Best</Text>
+              ) : (
+                <Text maxFontSizeMultiplier={maxFontScale.body} style={[styles.chipTag, { color: tone.solid }]}>
+                  {spokenRarity(pull.rarity)}
+                </Text>
+              )}
+              <Text maxFontSizeMultiplier={maxFontScale.body} numberOfLines={2} style={styles.chipName}>{pull.name}</Text>
+              <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.chipValue}>
+                {formatCents(pull.estimatedValueCents)}
+              </Text>
+            </View>
+          );
+        })}
+      </View>
     </View>
   );
+}
+
+function remainingPacksLabel(remaining: number): string {
+  if (remaining <= 1) {
+    return "1 pack left.";
+  }
+  return `${remaining} packs left.`;
+}
+
+function rarityColor(rarity: string | undefined) {
+  if (rarity && rarity in colors.rarity) {
+    return colors.rarity[rarity as RarityKey];
+  }
+  return colors.rarity.COMMON;
 }
 
 function openedPulls(packs: RevealPack[], cursor: number, currentRevealed: boolean): RevealCard[] {
@@ -784,7 +933,12 @@ function openedPulls(packs: RevealPack[], cursor: number, currentRevealed: boole
   return fanInOpenOrder(pulls);
 }
 
-function statusCopy(phase: RevealPhase, settling: boolean, reduced: boolean): string {
+function statusCopy(
+  phase: RevealPhase,
+  settling: boolean,
+  reduced: boolean,
+  presentation: OpenMode,
+): string {
   if (settling) {
     return "It springs shut.";
   }
@@ -795,7 +949,11 @@ function statusCopy(phase: RevealPhase, settling: boolean, reduced: boolean): st
       return "Dragging.";
     case "TEARING":
     case "OPEN":
+      return "Opening.";
     case "REVEALING_CARD":
+      if (presentation === "premium") {
+        return "Premium pull. Hold on.";
+      }
       return "Opening.";
     case "CARD_REVEALED":
     case "PACK_COMPLETE":
@@ -820,77 +978,252 @@ function waitWhile(keepWaiting: () => boolean, ms: number): Promise<void> {
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: "#12110f", padding: 24, paddingTop: 48 },
-  header: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginTop: 16 },
-  link: { color: "#e4c07a" },
-  title: { color: "#f4efe6", fontSize: 28, fontWeight: "600", marginTop: 16 },
-  notice: { color: "#c9bfb2", lineHeight: 20, marginTop: 12 },
-  amount: { color: "#f4efe6", fontSize: 26, fontWeight: "600", marginTop: 4 },
-  status: { color: "#c9bfb2", marginTop: 16 },
+  screen: {
+    backgroundColor: colors.backgroundPrimary,
+    flex: 1,
+  },
+  vignette: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: colors.backgroundSecondary,
+    opacity: 0.35,
+  },
+  body: {
+    flex: 1,
+    paddingBottom: spacing.xxl,
+    paddingHorizontal: layout.screenPadding,
+    paddingTop: spacing.sm,
+  },
+  column: {
+    gap: spacing.sm,
+  },
+  summary: {
+    gap: spacing.md,
+  },
+  summaryRow: {
+    alignItems: "baseline",
+    borderBottomColor: colors.borderSubtle,
+    borderBottomWidth: 1,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingVertical: spacing.md,
+  },
+  summaryLabel: {
+    ...typography.body,
+    color: colors.textSecondary,
+  },
+  summaryValue: {
+    ...typography.money,
+    color: colors.textPrimary,
+  },
+  summaryBest: {
+    backgroundColor: colors.surfacePrimary,
+    borderColor: colors.borderSubtle,
+    borderRadius: radius.card,
+    borderWidth: 1,
+    gap: spacing.xs,
+    padding: spacing.base,
+  },
+  bestName: {
+    ...typography.title,
+    color: colors.textPrimary,
+  },
+  bestValue: {
+    ...typography.bodySmall,
+    color: colors.textSecondary,
+  },
+  speedUp: {
+    backgroundColor: colors.surfacePrimary,
+    borderColor: colors.borderSubtle,
+    borderRadius: radius.card,
+    borderWidth: 1,
+    gap: spacing.sm,
+    padding: spacing.base,
+  },
+  speedUpTitle: {
+    ...typography.heading,
+    color: colors.textPrimary,
+  },
+  speedUpBody: {
+    ...typography.bodySmall,
+    color: colors.textSecondary,
+  },
+  header: {
+    alignItems: "flex-start",
+    flexDirection: "row",
+    gap: spacing.md,
+    justifyContent: "space-between",
+  },
+  headerCopy: {
+    flex: 1,
+    gap: spacing.xxs,
+  },
+  kicker: {
+    ...typography.label,
+    color: colors.textTertiary,
+  },
+  title: {
+    ...typography.titleLarge,
+    color: colors.textPrimary,
+  },
+  notice: {
+    ...typography.bodySmall,
+    color: colors.textSecondary,
+  },
+  statusBlock: {
+    gap: spacing.md,
+    marginTop: spacing.md,
+  },
+  progress: {
+    ...typography.caption,
+    color: colors.textTertiary,
+    letterSpacing: 0.4,
+    marginTop: spacing.sm,
+  },
+  status: {
+    ...typography.bodySmall,
+    color: colors.textSecondary,
+  },
   stage: {
     alignItems: "center",
-    height: 320,
+    height: 340,
     justifyContent: "center",
-    marginTop: 20,
+    marginTop: spacing.md,
+  },
+  ambient: {
+    borderRadius: radius.full,
+    height: 220,
+    position: "absolute",
+    width: 220,
+  },
+  sparkleLayer: {
+    ...StyleSheet.absoluteFill,
+  },
+  sparkle: {
+    position: "absolute",
   },
   sleeve: {
     alignItems: "center",
-    backgroundColor: "#1c1916",
-    borderColor: "#e4c07a",
-    borderRadius: 18,
+    backgroundColor: colors.surfaceElevated,
+    borderColor: colors.borderStrong,
+    borderRadius: radius.modal,
     borderWidth: 1,
-    height: 280,
+    height: 300,
     justifyContent: "center",
-    width: 200,
+    overflow: "hidden",
+    width: 214,
+    ...shadows.medium,
   },
-  brand: { color: "#e4c07a", fontSize: 12, letterSpacing: 2 },
-  tier: { color: "#f4efe6", fontSize: 22, fontWeight: "600", marginTop: 12 },
-  hint: { color: "#8d8478", marginTop: 28 },
+  sleeveEdge: {
+    borderRadius: radius.modal,
+    borderWidth: 1,
+    bottom: 10,
+    left: 10,
+    position: "absolute",
+    right: 10,
+    top: 10,
+  },
+  brand: {
+    ...typography.label,
+    color: colors.category.TRADING_CARD.solid,
+    letterSpacing: 2.4,
+  },
+  tier: {
+    ...typography.title,
+    color: colors.textPrimary,
+    marginTop: spacing.md,
+  },
+  hint: {
+    ...typography.bodySmall,
+    color: colors.textTertiary,
+    marginTop: spacing.xl,
+  },
   face: {
     alignItems: "center",
-    backgroundColor: "#1a1714",
-    borderColor: "#3a342c",
-    borderRadius: 18,
+    backgroundColor: colors.surfacePrimary,
+    borderColor: colors.borderSubtle,
+    borderRadius: radius.modal,
     borderWidth: 1,
-    height: 280,
+    height: 300,
     justifyContent: "center",
-    padding: 20,
-    width: 200,
+    overflow: "hidden",
+    paddingHorizontal: spacing.base,
+    paddingVertical: spacing.md,
+    width: 214,
+    ...shadows.medium,
   },
   faceRare: {
-    borderColor: "#e4c07a",
-    boxShadow: "0 0 18px #e4c07a",
+    backgroundColor: colors.surfaceElevated,
   },
-  hold: { color: "#e4c07a", fontSize: 18, fontWeight: "600" },
-  rarity: { color: "#e4c07a", fontSize: 12, letterSpacing: 1.2, textAlign: "center" },
-  cardName: { color: "#f4efe6", fontSize: 26, fontWeight: "600", marginTop: 12, textAlign: "center" },
-  meta: { color: "#c9bfb2", marginTop: 12, textAlign: "center" },
+  hold: {
+    ...typography.heading,
+    color: colors.accent.solid,
+    textAlign: "center",
+  },
+  cardBody: {
+    alignItems: "center",
+    gap: spacing.sm,
+    width: "100%",
+  },
+  cardArt: {
+    borderRadius: radius.card,
+    width: "100%",
+  },
+  rarity: {
+    ...typography.label,
+    letterSpacing: 1.2,
+    textAlign: "center",
+  },
+  cardName: {
+    ...typography.title,
+    color: colors.textPrimary,
+    textAlign: "center",
+  },
+  meta: {
+    ...typography.bodySmall,
+    color: colors.textSecondary,
+    textAlign: "center",
+  },
+  actions: {
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+  },
+  fanBlock: {
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+  },
+  fanKicker: {
+    ...typography.label,
+    color: colors.textTertiary,
+  },
   fan: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 8,
-    justifyContent: "center",
-    marginTop: 8,
+    gap: spacing.sm,
+    justifyContent: "flex-start",
   },
   chip: {
-    backgroundColor: "#1a1714",
-    borderColor: "#3a342c",
-    borderRadius: 8,
+    backgroundColor: colors.surfaceSecondary,
+    borderColor: colors.borderSubtle,
+    borderRadius: radius.sm,
     borderWidth: 1,
-    padding: 8,
-    width: 88,
+    padding: spacing.sm,
+    width: 96,
   },
-  chipBest: { borderColor: "#e4c07a" },
-  chipTag: { color: "#e4c07a", fontSize: 10, letterSpacing: 0.6 },
-  chipName: { color: "#f4efe6", fontSize: 12, marginTop: 4 },
-  primary: {
-    alignSelf: "flex-start",
-    backgroundColor: "#e4c07a",
-    borderRadius: 999,
-    marginTop: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+  chipBest: {
+    backgroundColor: colors.surfaceElevated,
   },
-  primaryLabel: { color: "#1a140c", fontWeight: "600" },
-  disabled: { opacity: 0.4 },
+  chipTag: {
+    ...typography.caption,
+    letterSpacing: 0.6,
+  },
+  chipName: {
+    ...typography.caption,
+    color: colors.textPrimary,
+    marginTop: spacing.xxs,
+  },
+  chipValue: {
+    ...typography.caption,
+    color: colors.textSecondary,
+    marginTop: spacing.xxs,
+  },
 });

@@ -1,34 +1,43 @@
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import * as Crypto from "expo-crypto";
 import {
-  ActivityIndicator,
   AppState,
   FlatList,
-  Image,
+  Platform,
   Pressable,
   RefreshControl,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from "react-native";
 
-import { ListingRejected, ListingUnknown, submitListing } from "../../api/listing";
-import { loadSealedPacks } from "../../api/reveal";
+import { loadSealedPacks, type SealedPack } from "../../api/reveal";
 import { watchTables } from "../../api/live";
-import type { AppStackParamList, PackCategory } from "../../navigation/types";
+import { AppHeader } from "../../components/AppHeader";
+import { AppBottomSheet, SheetOption, SheetTrigger } from "../../components/AppBottomSheet";
+import { Chip, ChipGroup } from "../../components/Chip";
+import { CollectibleArt } from "../../components/CollectibleArt";
+import { ConnectivityBanner } from "../../components/ConnectivityBanner";
+import { EmptyState } from "../../components/EmptyState";
+import { ErrorState } from "../../components/ErrorState";
+import { HoldingGridSkeleton } from "../../components/Skeleton";
+import type { AppStackParamList } from "../../navigation/types";
+import { colors, layout, maxFontScale, radius, spacing, typography } from "../../theme";
 import { formatCents } from "../../utils/money";
 import { categoryLabel } from "../shelf/packs";
-import { useOnline } from "../shelf/useOnline";
+import { HoldingCard } from "./HoldingCard";
 import { loadHoldings, type OwnedHolding } from "./inventory";
 import {
+  allTimePercentLabel,
+  categoryAllocation,
   formatSignedCents,
-  listedStateLabel,
   portfolioTotals,
   profitCents,
   selectHoldings,
+  topGainers,
   type PortfolioFilter,
   type PortfolioSort,
 } from "./portfolio";
@@ -38,6 +47,7 @@ const filters: { id: PortfolioFilter; label: string }[] = [
   { id: "TRADING_CARD", label: "Cards" },
   { id: "SNEAKER", label: "Sneakers" },
   { id: "WATCH", label: "Watches" },
+  { id: "LISTED", label: "Listed" },
 ];
 
 const sorts: { id: PortfolioSort; label: string }[] = [
@@ -46,14 +56,15 @@ const sorts: { id: PortfolioSort; label: string }[] = [
   { id: "recent", label: "Recently Acquired" },
 ];
 
+const emptyHoldings: OwnedHolding[] = [];
+
 export function CollectionScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<AppStackParamList>>();
   const queryClient = useQueryClient();
-  const online = useOnline();
+  const { width } = useWindowDimensions();
   const [filter, setFilter] = useState<PortfolioFilter>("ALL");
   const [sort, setSort] = useState<PortfolioSort>("recent");
-  const [notice, setNotice] = useState<string | null>(null);
-  const [delistingId, setDelistingId] = useState<string | null>(null);
+  const [sortOpen, setSortOpen] = useState(false);
   const holdings = useQuery({
     queryKey: ["holdings"],
     queryFn: loadHoldings,
@@ -91,39 +102,16 @@ export function CollectionScreen() {
     };
   }, [refresh]);
 
-  const delist = useCallback(async (holding: OwnedHolding) => {
-    if (!holding.listingId || !online || delistingId) {
-      return;
-    }
-    setDelistingId(holding.ownedItemId);
-    setNotice("Removing the listing…");
-    try {
-      await submitListing({
-        action: "delist",
-        listingId: holding.listingId,
-        idempotencyKey: Crypto.randomUUID(),
-      });
-      setNotice(null);
-      void queryClient.invalidateQueries({ queryKey: ["holdings"] });
-    } catch (error) {
-      if (error instanceof ListingUnknown) {
-        setNotice("Removing the listing… This change may have completed. We're checking before retrying.");
-        return;
-      }
-      setNotice(error instanceof ListingRejected ? error.message : "That listing change did not go through. Try it again.");
-    } finally {
-      setDelistingId(null);
-    }
-  }, [delistingId, online, queryClient]);
-
-  const visible = useMemo(
-    () => selectHoldings(holdings.data ?? [], filter, sort),
-    [filter, holdings.data, sort],
+  const items = holdings.data ?? emptyHoldings;
+  const visible = useMemo(() => selectHoldings(items, filter, sort), [filter, items, sort]);
+  const totals = useMemo(() => (holdings.data ? portfolioTotals(holdings.data) : null), [holdings.data]);
+  const paidCents = useMemo(
+    () => items.reduce((sum, item) => sum + item.acquisitionPriceCents, 0n),
+    [items],
   );
-  const totals = useMemo(
-    () => (holdings.data ? portfolioTotals(holdings.data) : null),
-    [holdings.data],
-  );
+  const allTimePercent = totals ? allTimePercentLabel(totals.valueCents, paidCents) : null;
+  const allocation = useMemo(() => categoryAllocation(items), [items]);
+  const gainers = useMemo(() => topGainers(items), [items]);
   const openListing = useCallback((ownedItemId: string) => {
     navigation.navigate("Listing", { ownedItemId });
   }, [navigation]);
@@ -131,213 +119,239 @@ export function CollectionScreen() {
     navigation.navigate("Reveal", { purchasedPackIds: [purchasedPackId] });
   }, [navigation]);
 
+  const collectionEmpty = holdings.data !== undefined
+    && sealed.data !== undefined
+    && holdings.data.length === 0
+    && sealed.data.length === 0
+    && !holdings.isError
+    && !sealed.isError
+    && !holdings.isLoading
+    && !sealed.isLoading;
+  const showFilters = items.length > 0;
+  const columnGap = spacing.md;
+  const cardWidth = (width - layout.screenPadding * 2 - columnGap) / 2;
+  const artHeight = Math.round(cardWidth * 0.72);
+
   const header = (
-    <View>
-      <Pressable onPress={() => navigation.navigate("Shelf")}>
-        <Text style={styles.link}>Shelf</Text>
-      </Pressable>
-      <Text style={styles.title}>Portfolio</Text>
-      {totals ? (
-        <View>
-          <Text style={styles.notice}>Total portfolio value</Text>
-          <Text style={styles.amount}>{formatCents(totals.valueCents)}</Text>
-          <Text style={styles.notice}>P&L</Text>
-          <Text style={styles.amount}>{formatSignedCents(totals.profitCents)}</Text>
+    <View style={styles.header}>
+      {totals && items.length > 0 ? (
+        <View style={styles.summary}>
+          <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.kicker}>Portfolio</Text>
+          <Text maxFontSizeMultiplier={maxFontScale.display} style={styles.total}>
+            {formatCents(totals.valueCents)}
+          </Text>
+          <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.pnl}>
+            {formatSignedCents(totals.profitCents)}
+            {allTimePercent ? ` · ${allTimePercent} all-time` : " all-time"}
+          </Text>
         </View>
       ) : null}
-      <View style={styles.chips}>
-        {filters.map((choice) => (
-          <Pressable
-            key={choice.id}
-            accessibilityRole="button"
-            accessibilityLabel={choice.label}
-            style={[styles.chip, filter === choice.id ? styles.chipOn : null]}
-            onPress={() => setFilter(choice.id)}
-          >
-            <Text style={[styles.chipLabel, filter === choice.id ? styles.chipLabelOn : null]}>{choice.label}</Text>
-          </Pressable>
-        ))}
-      </View>
-      <View style={styles.chips}>
-        {sorts.map((choice) => (
-          <Pressable
-            key={choice.id}
-            accessibilityRole="button"
-            accessibilityLabel={choice.label}
-            style={[styles.chip, sort === choice.id ? styles.chipOn : null]}
-            onPress={() => setSort(choice.id)}
-          >
-            <Text style={[styles.chipLabel, sort === choice.id ? styles.chipLabelOn : null]}>{choice.label}</Text>
-          </Pressable>
-        ))}
-      </View>
-      {!online ? (
-        <Text style={styles.notice}>You're offline. This portfolio may be out of date. Listing and delist stay disabled until the connection returns.</Text>
+
+      {allocation.length > 1 ? (
+        <View style={styles.section}>
+          <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.sectionTitle}>Category Allocation</Text>
+          {allocation.map((row) => (
+            <View key={row.category} style={styles.allocRow}>
+              <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.allocLabel}>{row.label}</Text>
+              <View style={styles.allocTrack}>
+                <View
+                  style={[
+                    styles.allocFill,
+                    {
+                      backgroundColor: colors.category[row.category].solid,
+                      width: `${row.share}%`,
+                    },
+                  ]}
+                />
+              </View>
+              <Text maxFontSizeMultiplier={maxFontScale.display} style={styles.allocPct}>{row.percentLabel}</Text>
+            </View>
+          ))}
+        </View>
       ) : null}
-      {notice ? <Text style={styles.notice}>{notice}</Text> : null}
+
+      {gainers.length > 0 ? (
+        <View style={styles.section}>
+          <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.sectionTitle}>Top Gainers</Text>
+          {gainers.map((holding) => {
+            const profit = profitCents(holding.estimatedValueCents, holding.acquisitionPriceCents);
+            const percent = allTimePercentLabel(holding.estimatedValueCents, holding.acquisitionPriceCents);
+            return (
+              <Pressable
+                key={holding.ownedItemId}
+                accessibilityLabel={`${holding.name}. ${formatSignedCents(profit)}${percent ? `. All-time ${percent}` : ""}`}
+                accessibilityRole="button"
+                onPress={() => openListing(holding.ownedItemId)}
+                style={({ pressed }) => [styles.gainer, pressed ? styles.pressed : null]}
+              >
+                <Text maxFontSizeMultiplier={maxFontScale.body} numberOfLines={1} style={styles.gainerName}>
+                  {holding.name}
+                </Text>
+                <Text maxFontSizeMultiplier={maxFontScale.display} style={styles.gainerPnl}>
+                  {formatSignedCents(profit)}{percent ? ` · ${percent}` : ""}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : null}
+
+      {sealed.data && sealed.data.length > 0 ? (
+        <View style={styles.section}>
+          <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.sectionTitle}>To open</Text>
+          {sealed.data.map((pack) => (
+            <SealedRow key={pack.purchasedPackId} pack={pack} onPress={() => openReveal(pack.purchasedPackId)} />
+          ))}
+        </View>
+      ) : null}
+
+      <ConnectivityBanner offlineDetail="This portfolio may be out of date. Listing and delist stay disabled until the connection returns." />
       {holdings.isLoading || sealed.isLoading ? (
-        <View>
-          <ActivityIndicator color="#e4c07a" />
-          <Text style={styles.notice}>Loading your items…</Text>
-        </View>
+        <HoldingGridSkeleton artHeight={artHeight} width={cardWidth} />
       ) : null}
       {holdings.isError || sealed.isError ? (
-        <View>
-          <Text style={styles.notice}>Your items didn't load. Check the connection and try again.</Text>
-          <Pressable
-            style={styles.primary}
-            onPress={() => {
-              void holdings.refetch();
-              void sealed.refetch();
-            }}
-          >
-            <Text style={styles.primaryLabel}>Try again</Text>
-          </Pressable>
-        </View>
+        <ErrorState
+          body="Check the connection and try again."
+          title="Your items didn't load."
+          onRetry={() => {
+            void holdings.refetch();
+            void sealed.refetch();
+          }}
+        />
       ) : null}
-      {sealed.data?.map((pack) => (
-        <Pressable
-          key={pack.purchasedPackId}
-          style={styles.card}
-          onPress={() => openReveal(pack.purchasedPackId)}
-        >
-          <Text style={styles.category}>Trading cards</Text>
-          <Text style={styles.name}>{pack.name}</Text>
-          <Text style={styles.meta}>{pack.tier}</Text>
-          <Text style={styles.listed}>Sealed</Text>
-        </Pressable>
-      ))}
-      {holdings.data && holdings.data.length === 0 && (sealed.data?.length ?? 0) === 0 ? (
-        <Text style={styles.notice}>You don't own any items yet.{"\n\n"}Open a pack from the shelf.</Text>
+      {collectionEmpty ? (
+        <EmptyCollection
+          onBrowseMarket={() => navigation.navigate("Tabs", { screen: "Market" })}
+          onExplorePacks={() => navigation.navigate("Tabs", { screen: "Packs" })}
+        />
       ) : null}
       {holdings.data && holdings.data.length === 0 && (sealed.data?.length ?? 0) > 0 ? (
-        <Text style={styles.notice}>Opened items show up here.</Text>
+        <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.notice}>Opened items show up here.</Text>
       ) : null}
       {holdings.data && visible.length === 0 && holdings.data.length > 0 ? (
-        <Text style={styles.notice}>{emptyFilterCopy(filter)}</Text>
+        <EmptyState icon="albums-outline" title={emptyFilterCopy(filter)} />
+      ) : null}
+      {visible.length > 0 ? (
+        <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.sectionTitle}>Collection</Text>
       ) : null}
     </View>
   );
 
   const renderHolding = useCallback(({ item }: { item: OwnedHolding }) => (
-    <HoldingRow
-      busy={delistingId === item.ownedItemId}
-      disabled={!online || delistingId !== null}
+    <HoldingCard
+      artHeight={artHeight}
       holding={item}
-      onDelist={delist}
+      width={cardWidth}
       onOpen={openListing}
     />
-  ), [delist, delistingId, online, openListing]);
+  ), [artHeight, cardWidth, openListing]);
 
   return (
-    <FlatList
-      contentContainerStyle={styles.content}
-      data={visible}
-      extraData={`${delistingId ?? ""}:${online}`}
-      initialNumToRender={8}
-      keyExtractor={(holding) => holding.ownedItemId}
-      ListHeaderComponent={header}
-      maxToRenderPerBatch={8}
-      refreshControl={
-        <RefreshControl
-          refreshing={(holdings.isRefetching || sealed.isRefetching) && !holdings.isLoading && !sealed.isLoading}
-          tintColor="#e4c07a"
-          onRefresh={() => {
-            void holdings.refetch();
-            void sealed.refetch();
-          }}
-        />
-      }
-      renderItem={renderHolding}
-      style={styles.screen}
-      windowSize={7}
-    />
+    <View style={styles.screen}>
+      <AppHeader cart title="Portfolio" />
+      {showFilters ? (
+        <View style={styles.filters}>
+          <ChipGroup accessibilityLabel="Portfolio category">
+            {filters.map((chip) => (
+              <Chip
+                key={chip.id}
+                label={chip.label}
+                selected={filter === chip.id}
+                onPress={() => setFilter(chip.id)}
+              />
+            ))}
+          </ChipGroup>
+          <SheetTrigger
+            label={`Sort · ${sorts.find((chip) => chip.id === sort)?.label ?? "Recently Acquired"}`}
+            onPress={() => setSortOpen(true)}
+          />
+        </View>
+      ) : null}
+      <FlatList
+        ListHeaderComponent={header}
+        columnWrapperStyle={showFilters ? styles.columns : undefined}
+        contentContainerStyle={[styles.content, collectionEmpty ? styles.contentEmpty : null]}
+        data={visible}
+        extraData={`${cardWidth}:${filter}:${sort}`}
+        initialNumToRender={8}
+        keyExtractor={(holding) => holding.ownedItemId}
+        maxToRenderPerBatch={8}
+        numColumns={2}
+        refreshControl={
+          <RefreshControl
+            refreshing={(holdings.isRefetching || sealed.isRefetching) && !holdings.isLoading && !sealed.isLoading}
+            tintColor={colors.accent.solid}
+            onRefresh={() => {
+              void holdings.refetch();
+              void sealed.refetch();
+            }}
+          />
+        }
+        removeClippedSubviews={Platform.OS !== "web"}
+        renderItem={renderHolding}
+        style={styles.screen}
+        windowSize={7}
+      />
+      <AppBottomSheet title="Sort" visible={sortOpen} onClose={() => setSortOpen(false)}>
+        {sorts.map((chip) => (
+          <SheetOption
+            key={chip.id}
+            label={chip.label}
+            selected={sort === chip.id}
+            onPress={() => {
+              setSort(chip.id);
+              setSortOpen(false);
+            }}
+          />
+        ))}
+      </AppBottomSheet>
+    </View>
   );
 }
 
-const HoldingRow = memo(function HoldingRow({
-  holding,
-  busy,
-  disabled,
-  onOpen,
-  onDelist,
+function SealedRow({ pack, onPress }: { pack: SealedPack; onPress: () => void }) {
+  return (
+    <Pressable
+      accessibilityLabel={`${pack.name}. Sealed. ${pack.tier}`}
+      accessibilityRole="button"
+      onPress={onPress}
+      style={({ pressed }) => [styles.sealed, pressed ? styles.pressed : null]}
+    >
+      <CollectibleArt category="TRADING_CARD" height={56} style={styles.sealedArt} title={pack.name} />
+      <View style={styles.sealedCopy}>
+        <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.sealedKicker}>
+          {categoryLabel("TRADING_CARD")}
+        </Text>
+        <Text maxFontSizeMultiplier={maxFontScale.body} numberOfLines={1} style={styles.gainerName}>{pack.name}</Text>
+        <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.notice}>{pack.tier} · Sealed</Text>
+      </View>
+    </Pressable>
+  );
+}
+
+function EmptyCollection({
+  onExplorePacks,
+  onBrowseMarket,
 }: {
-  holding: OwnedHolding;
-  busy: boolean;
-  disabled: boolean;
-  onOpen: (ownedItemId: string) => void;
-  onDelist: (holding: OwnedHolding) => void;
+  onExplorePacks: () => void;
+  onBrowseMarket: () => void;
 }) {
   return (
-    <View style={styles.card}>
-      <View style={styles.item}>
-        {holding.imageUrl ? (
-          <Image
-            accessibilityLabel={holding.name}
-            resizeMode="cover"
-            source={{ uri: holding.imageUrl }}
-            style={styles.thumb}
-          />
-        ) : (
-          <View style={styles.thumb}>
-            <Text style={styles.mark}>{categoryMark(holding.category)}</Text>
-          </View>
-        )}
-        <View style={styles.itemBody}>
-          <Text style={styles.category}>{categoryLabel(holding.category)}</Text>
-          <Text style={styles.name}>{holding.name}</Text>
-          <Text style={styles.meta}>{holding.rarity}</Text>
-          <Text style={styles.meta}>Current value {formatCents(holding.estimatedValueCents)}</Text>
-          <Text style={styles.meta}>
-            P&L {formatSignedCents(profitCents(holding.estimatedValueCents, holding.acquisitionPriceCents))}
-          </Text>
-          <Text style={styles.listed}>
-            {holding.state === "LISTED" && holding.listingPriceCents !== null
-              ? `Listed at ${formatCents(holding.listingPriceCents)}`
-              : listedStateLabel(holding.state)}
-          </Text>
+    <EmptyState
+      body="Open your first pack or purchase a collectible from the market."
+      illustration={
+        <View style={styles.emptyStage}>
+          <CollectibleArt category="TRADING_CARD" height={88} style={styles.emptyTile} title="Cards" />
+          <CollectibleArt category="SNEAKER" height={88} style={styles.emptyTile} title="Sneakers" />
+          <CollectibleArt category="WATCH" height={88} style={styles.emptyTile} title="Watches" />
         </View>
-      </View>
-      <View style={styles.actions}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="View details"
-          onPress={() => onOpen(holding.ownedItemId)}
-        >
-          <Text style={styles.action}>View details</Text>
-        </Pressable>
-        {holding.state === "LISTED" && holding.listingId ? (
-          <View style={styles.actions}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Edit listing"
-              onPress={() => onOpen(holding.ownedItemId)}
-            >
-              <Text style={styles.action}>Edit listing</Text>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Delist"
-              disabled={disabled}
-              onPress={() => onDelist(holding)}
-            >
-              <Text style={styles.action}>{busy ? "Removing…" : "Delist"}</Text>
-            </Pressable>
-          </View>
-        ) : (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="List for sale"
-            onPress={() => onOpen(holding.ownedItemId)}
-          >
-            <Text style={styles.action}>List for sale</Text>
-          </Pressable>
-        )}
-      </View>
-    </View>
+      }
+      primaryAction={{ label: "Explore Packs", onPress: onExplorePacks }}
+      secondaryAction={{ label: "Browse Market", onPress: onBrowseMarket }}
+      title="Start your collection"
+    />
   );
-});
-
+}
 function emptyFilterCopy(filter: PortfolioFilter): string {
   if (filter === "TRADING_CARD") {
     return "Nothing in Cards is in your portfolio.";
@@ -348,68 +362,143 @@ function emptyFilterCopy(filter: PortfolioFilter): string {
   if (filter === "WATCH") {
     return "Nothing in Watches is in your portfolio.";
   }
+  if (filter === "LISTED") {
+    return "None of your items are listed.";
+  }
   return "You don't own any items yet.";
 }
 
-function categoryMark(category: PackCategory): string {
-  if (category === "TRADING_CARD") {
-    return "C";
-  }
-  if (category === "SNEAKER") {
-    return "S";
-  }
-  return "W";
-}
-
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: "#12110f" },
-  content: { padding: 24, paddingTop: 48, paddingBottom: 48 },
-  link: { color: "#e4c07a" },
-  title: { color: "#f4efe6", fontSize: 28, fontWeight: "600", marginTop: 16 },
-  notice: { color: "#c9bfb2", lineHeight: 20, marginTop: 12 },
-  amount: { color: "#f4efe6", fontSize: 26, fontWeight: "600", marginTop: 4 },
-  chips: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 16 },
-  chip: {
-    borderColor: "#3a342c",
-    borderRadius: 999,
-    borderWidth: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+  screen: {
+    flex: 1,
+    backgroundColor: colors.backgroundPrimary,
   },
-  chipOn: { backgroundColor: "#e4c07a", borderColor: "#e4c07a" },
-  chipLabel: { color: "#e4c07a", fontWeight: "600" },
-  chipLabelOn: { color: "#1a140c" },
-  card: {
-    borderColor: "#2e2a26",
-    borderRadius: 16,
-    borderWidth: 1,
-    marginTop: 16,
-    padding: 16,
+  filters: {
+    gap: spacing.xs,
+    paddingHorizontal: layout.screenPadding,
+    paddingTop: spacing.xs,
   },
-  item: { flexDirection: "row", gap: 12 },
-  itemBody: { flex: 1 },
-  thumb: {
+  header: {
+    gap: spacing.lg,
+    marginBottom: spacing.md,
+  },
+  summary: {
+    gap: spacing.xs,
+  },
+  kicker: {
+    ...typography.label,
+    color: colors.textTertiary,
+  },
+  total: {
+    ...typography.moneyLarge,
+    color: colors.textPrimary,
+  },
+  pnl: {
+    ...typography.body,
+    color: colors.textSecondary,
+  },
+  section: {
+    gap: spacing.sm,
+  },
+  sectionTitle: {
+    ...typography.heading,
+    color: colors.textPrimary,
+  },
+  allocRow: {
     alignItems: "center",
-    backgroundColor: "#1c1916",
-    borderRadius: 12,
-    height: 72,
+    flexDirection: "row",
+    gap: spacing.sm,
+  },
+  allocLabel: {
+    ...typography.bodySmall,
+    color: colors.textSecondary,
+    width: 88,
+  },
+  allocTrack: {
+    backgroundColor: colors.surfaceSecondary,
+    borderRadius: radius.full,
+    flex: 1,
+    height: 6,
+    overflow: "hidden",
+  },
+  allocFill: {
+    borderRadius: radius.full,
+    height: 6,
+  },
+  allocPct: {
+    ...typography.moneySmall,
+    color: colors.textPrimary,
+    minWidth: 48,
+    textAlign: "right",
+  },
+  gainer: {
+    flexDirection: "row",
+    gap: spacing.md,
+    justifyContent: "space-between",
+    minHeight: layout.minTouchTarget,
+    paddingVertical: spacing.xs,
+  },
+  gainerName: {
+    ...typography.bodyMedium,
+    color: colors.textPrimary,
+    flex: 1,
+  },
+  gainerPnl: {
+    ...typography.moneySmall,
+    color: colors.textSecondary,
+  },
+  sealed: {
+    alignItems: "center",
+    backgroundColor: colors.surfacePrimary,
+    borderColor: colors.borderSubtle,
+    borderRadius: radius.card,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: spacing.md,
+    overflow: "hidden",
+    padding: spacing.sm,
+  },
+  sealedArt: {
+    borderRadius: radius.sm,
+    width: 56,
+  },
+  sealedCopy: {
+    flex: 1,
+    gap: spacing.xxs,
+  },
+  sealedKicker: {
+    ...typography.label,
+    color: colors.textTertiary,
+  },
+  pressed: {
+    backgroundColor: colors.surfacePressed,
+  },
+  notice: {
+    ...typography.bodySmall,
+    color: colors.textSecondary,
+  },
+  status: {
+    gap: spacing.sm,
+  },
+  content: {
+    paddingBottom: spacing.xxl,
+    paddingHorizontal: layout.screenPadding,
+    paddingTop: spacing.md,
+  },
+  contentEmpty: {
+    flexGrow: 1,
     justifyContent: "center",
-    width: 72,
   },
-  mark: { color: "#e4c07a", fontSize: 22, fontWeight: "600" },
-  actions: { flexDirection: "row", flexWrap: "wrap", gap: 16, marginTop: 12 },
-  action: { color: "#e4c07a", fontWeight: "600" },
-  category: { color: "#a3988c", fontSize: 12, letterSpacing: 0.6, textTransform: "uppercase" },
-  name: { color: "#f4efe6", fontSize: 20, fontWeight: "600", marginTop: 8 },
-  meta: { color: "#c9bfb2", marginTop: 4 },
-  listed: { color: "#e4c07a", fontWeight: "600", marginTop: 12 },
-  primary: {
-    alignSelf: "flex-start",
-    backgroundColor: "#e4c07a",
-    borderRadius: 999,
-    marginTop: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+  columns: {
+    gap: spacing.md,
+    marginBottom: spacing.md,
   },
-  primaryLabel: { color: "#1a140c", fontWeight: "600" },
+  emptyStage: {
+    flexDirection: "row",
+    gap: spacing.sm,
+  },
+  emptyTile: {
+    flex: 1,
+    minWidth: 0,
+  },
 });

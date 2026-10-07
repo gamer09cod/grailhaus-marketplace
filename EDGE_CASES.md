@@ -38,7 +38,8 @@ Status values are `Handled`, `Partially Handled`, or `Cut`. The wallet, shelf, d
 | Reviewer signs in | Email and password against Supabase Auth. Confirmations are off locally | Wallet shows `$10,000.00` | Handled |
 | New account is created | Signup trigger inserts a profile and a zero wallet. No opening deposit | Create-account copy says the account starts at `$0.00`. The wallet shows `$0.00` | Handled |
 | Wallet screen loads the catalog | Signed-in select of `catalog_items` and `pack_skus` | `81 collectibles across 9 packs` | Handled |
-| Mock deposit of $100 | Edge function calls `deposit`. One ledger row and the cached balance commit together | Balance increases by `$100.00` and the screen says `Deposited $100.00.` | Handled |
+| Mock deposit of $100 | Edge function calls `deposit`. One ledger row and the cached balance commit together. Presets only fill the amount; the sheet footer confirms | Balance increases by `$100.00` and the screen says `Deposited $100.00.` | Handled |
+| Deposit sheet is dismissed while confirming | Scrim, Close, and drag dismiss stay blocked while the request is in flight | Sheet stays open with `Confirming deposit…` | Handled |
 | Same deposit key is sent again | Completed idempotency row returns the stored receipt. No second ledger row | Balance does not increase a second time | Handled |
 | Same deposit key is sent with a different amount | `IDEMPOTENCY_KEY_REUSED` | The deposit is rejected. The balance stays on the original amount | Handled |
 | Deposit amount is `$0` or above `$1,000,000` | Edge function rejects the body. The database cap rejects a bypass | `Enter an amount from $0.01 to $1,000,000.` | Handled |
@@ -83,7 +84,9 @@ Status values are `Handled`, `Partially Handled`, or `Cut`. The wallet, shelf, d
 | Device is in airplane mode during checkout | Review Purchase and Confirm Purchase stay disabled while offline. A stored payment is not sent until the connection returns | `You're offline. This cart may be out of date. Reservations stay disabled until the connection returns.` | Handled |
 | Expired hold races a new reserve of the last unit | The sweep releases the hold before either checkout or the new reserve proceeds. The expired checkout charges nothing. The new reserve holds the unit | The holder sees `These packs are no longer reserved.` The other buyer can reserve | Handled |
 | App is backgrounded while a reservation expires | The cart refreshes on foreground and the sweep releases due holds | The line shows `Reservation expired` and `Reserve Again` | Handled |
-| Seller lists an owned item | One transaction locks the item, inserts one active listing, and marks it `LISTED` | Collection shows `List for sale`. The listing screen shows the server fee and `You receive` | Handled |
+| Seller lists an owned item | One transaction locks the item, inserts one active listing, and marks it `LISTED`. Price and fee preview live in a confirmation sheet; list starts only from that footer | Collection shows `List for sale`. The sheet shows the server fee and `You receive` | Handled |
+| Seller confirms delist | Delist opens a confirmation sheet. Remove listing starts the request; Keep listing closes the sheet | `Remove this listing? The item stays in your portfolio.` | Handled |
+| Bottom sheet minor choice | Quantity, filters, sort, deposit, listing price, delist, and activity details use `AppBottomSheet` | Scrim, Close, Escape, and drag dismiss. Financial sheets fade only | Handled |
 | Seller lists the same item twice | The second call raises `LISTING_ALREADY_ACTIVE`. Two concurrent calls leave one active listing | `That item is already listed.` | Handled |
 | Seller changes the listing price | `reprice_listing` locks the active listing and writes the new price. A replay of the same key does not apply a later price | `Save price` | Handled |
 | Seller delists | The listing becomes `DELISTED` and the item returns to `OWNED` | `Delist` | Handled |
@@ -112,9 +115,13 @@ Status values are `Handled`, `Partially Handled`, or `Cut`. The wallet, shelf, d
 | Wallet cannot cover the pack total | `INSUFFICIENT_BALANCE`. The hold stays | `You do not have enough in your wallet.` | Handled |
 | Sold-out pack is offered after the hold is gone | `SOLD_OUT` when nothing remains on hand. The cart line stays until the buyer removes it | `That pack is sold out. Remove it from your cart.` | Handled |
 | Checkout omits a cart line | `CART_CHANGED`. A pack hold in that cart stays active | `Your cart changed. One or more items changed since you reviewed your order.` | Handled |
-| Portfolio has no holdings | No opened items and no sealed packs | `You don't own any items yet. Open a pack from the shelf.` | Handled |
+| Portfolio has no holdings | No opened items and no sealed packs | `Start your collection` / `Open your first pack or purchase a collectible from the market.` Explore Packs and Browse Market | Handled |
 | Device is offline on the portfolio | Delist stays disabled. The last holdings may remain | `You're offline. This portfolio may be out of date. Listing and delist stay disabled until the connection returns.` | Handled |
 | Sign-in email or password is wrong | Auth rejects the credentials. No session is stored | `That email or password is wrong. Try again.` | Handled |
+| Wallet activity has no rows | Own ledger is empty | `No activity yet. Deposits, purchases, and sales show up here.` | Handled |
+| Purchases list is empty | Own purchases is empty | `You haven't purchased yet. Packs and market listings you buy show up here.` | Handled |
+| Activity or purchases fail to load | The select errors. Nothing is invented | `Your activity didn't load. Check the connection and try again.` / `Your purchases didn't load. Check the connection and try again.` | Handled |
+| Sign out fails | Auth does not clear the session | `Sign out did not finish. Check the connection and try again.` | Handled |
 | QA: another user buys N packs | The stand-in buyer reserves and checks out through the pack purchase path. The reviewer's wallet is unchanged | Shelf available count drops. Pull to refresh or a stock change reloads it | Handled |
 | QA: seller reprices, delists, or sells elsewhere | The seller's listing function or the stand-in checkout runs. A buyer who still holds the line sees the new state, and checkout rejects it | Cart shows the price change, `The seller removed this listing.`, or `This listing has already sold.` | Handled |
 | QA: start or end a drop | `starts_at` and `ends_at` move. Status is still derived from `now()` | Drops shows `LIVE` or `ENDED` after the board reloads | Handled |
@@ -127,9 +134,10 @@ Status values are `Handled`, `Partially Handled`, or `Cut`. The wallet, shelf, d
 | Slow drag to the same short position as a flick | Speed is too low, so the sleeve springs shut | The pack stays sealed | Handled |
 | A timer opens a sealed pack | No timer starts the tear. Packs 1 and 2 wait for the gesture. Later packs open only after Fast Open is pressed | The pack stays sealed until that gesture or press | Handled |
 | First two packs in a multi-pack open | Fast Open is not offered. The tear is the same gesture as one pack | `Pack 1 of 10` and `Sealed. Drag down to tear it open.` | Handled |
-| Packs after the second | Fast Open plays a short tear, then the stored card, then a fan of cards already opened in this purchase. Contents are not redrawn | `Fast Open`, then the stored name and `Best` on the top card | Handled |
+| Packs after the second | Fast Open plays a short tear, then the stored card, then a fan of cards already opened in this purchase. Contents are not redrawn | `Speed up remaining packs?`, `Fast Open`, then the stored name and `Best` on the top card | Handled |
+| Epic or legendary during Fast Open | `openMode` returns `premium`. The short tear still runs, then the longer hold and rarity glow. Fast Open is offered again on the next sealed pack | `Premium pull. Hold on.` then the stored card | Handled |
 | Epic or legendary card after pack 2 | Fast pacing stops for that card. The longer hold and brighter frame play the stored card | `Hold on.` then that card | Handled |
-| Summary after the last pack of a multi-pack open | Counts the packs. Sums acquisition prices and catalog values as integer cents. Names the best stored card by rarity, then value | `10 Packs Opened`, `Total spent`, `Estimated value`, `Best pull`, `View Portfolio` | Handled |
+| Summary after the last pack of a multi-pack open | Counts the packs. Sums acquisition prices and catalog values as integer cents. Names the best stored card by rarity, then value | `10 Packs Opened`, `Total spent`, `Collection value`, `Best pull` with rarity and cents, `View Portfolio` | Handled |
 | One purchased pack | No summary. Done still completes that pack | `This pack is open.` | Handled |
 | Reveal skips ahead or another user opens the pack | `REVEAL_STEP` or `PACK_NOT_FOUND`. Contents stay as drawn | `Open this pack in order. A tap does not finish it.` or `That pack is not in your collection.` | Handled |
 | Same reveal key is sent again | The stored response is returned. The row does not move backward and contents do not change | The open pack stays open | Handled |
@@ -144,7 +152,7 @@ Status values are `Handled`, `Partially Handled`, or `Cut`. The wallet, shelf, d
 | App is killed after an earlier pack in the purchase is complete | Completed packs stay complete. Reopening continues at the first pack that is not complete. That position still chooses the full tear or Fast Open | `Pack 4 of 10` and `Fast Open` when packs 1–3 are already complete | Handled |
 | App backgrounds during an uncommitted tear | A drag that has not stored `OPEN` is dropped. The sleeve returns to sealed and no reveal request is sent. A tear that already called the server keeps that step | The pack is sealed again. The stored card is unchanged | Handled |
 | Finger moves the sealed sleeve | The sleeve position is an animated value. The reveal screen does not render again on each move. Dragging and the spring shut still use the same distance and velocity rules | The sleeve follows the finger. A short drag says `It springs shut.` | Handled |
-| Market or portfolio has many rows | The list mounts a window of rows. Holdings use two-column cards | Off-screen holdings are not mounted. The empty portfolio copy is unchanged | Handled |
+| Market or portfolio has many rows | The list mounts a window of rows. Holdings use two-column cards | Off-screen holdings are not mounted. An empty portfolio shows Start your collection, not a ledger | Handled |
 | A countdown is ticking | The hold label and an upcoming drop label update once a second. The surrounding screen renders again when the hold expires or the drop boundary is reached | `Reserved for 04:32` and `Starts in` keep counting | Handled |
 | Several stock rows change at once | The screen's channel is removed when it leaves. Changes inside the same moment refresh that screen once | The shelf, cart, market, or portfolio reloads one time | Handled |
 | App is killed during the card reveal | `OPEN`, `REVEALING_CARD`, or `CARD_REVEALED` shows the stored card. Missing steps are written forward. The sealed tear is not replayed and contents are not redrawn | The stored card name, without tearing the sleeve again | Handled |
@@ -154,7 +162,7 @@ Status values are `Handled`, `Partially Handled`, or `Cut`. The wallet, shelf, d
 | Sealed trading card in the portfolio | The holding stays hidden until `PACK_COMPLETE`. It is not added to the totals | `Sealed` on the pack. The card name appears after Done | Handled |
 | Portfolio filter | Cards, Sneakers, and Watches each keep their own holdings. Listed keeps items that are for sale. All shows every opened holding | `Nothing in Sneakers is in your portfolio.` / `None of your items are listed.` when that filter is empty | Handled |
 | Portfolio sort | Value and P&L use the integer cents. Recently Acquired uses `acquired_at`. An equal amount keeps the newer holding first | `Value`, `P&L`, `Recently Acquired` | Handled |
-| Portfolio listing actions | Tapping a holding opens the listing screen for details, list, edit, and delist | `LISTED` on the card. Listing screen still has `View details` / `List for sale` / `Edit listing` / `Delist` | Handled |
+| Portfolio listing actions | Tapping a holding opens the listing screen for details. List, change price, and delist confirm in sheets | `LISTED` on the card. `List for sale` / `Change price` / `Delist` open sheets | Handled |
 | Collectible value drifts | `apply_price_drift` writes `current_value_cents` from the item id, the seeded value, and the current hour. The step is 30 basis points. The result stays inside 70% to 130% | Portfolio, reveal, and the market show that stored estimate | Handled |
 | Same hour is read again | The clock row already has this hour. The function does not take another step | The estimate stays on the cents from the first read of the hour | Handled |
 | Pack price drifts | `apply_price_drift` does not update `pack_skus`. The starter pack stays `1000` cents | The shelf still shows `$10.00` | Handled |

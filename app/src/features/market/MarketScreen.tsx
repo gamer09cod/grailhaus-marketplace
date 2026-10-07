@@ -1,36 +1,85 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useFocusEffect, useNavigation } from "@react-navigation/native";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useFocusEffect, useNavigation, useRoute } from "@react-navigation/native";
+import type { RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import * as Crypto from "expo-crypto";
 import {
-  ActivityIndicator,
   AppState,
-  Pressable,
   FlatList,
+  Platform,
   RefreshControl,
   StyleSheet,
   Text,
+  TextInput,
+  useWindowDimensions,
   View,
 } from "react-native";
 
-import { CartRejected, CartUnknown, submitCart } from "../../api/cart";
 import { watchTables } from "../../api/live";
-import type { AppStackParamList } from "../../navigation/types";
-import { formatCents } from "../../utils/money";
-import { categoryLabel } from "../shelf/packs";
-import { useOnline } from "../shelf/useOnline";
+import { AppHeader } from "../../components/AppHeader";
+import { AppBottomSheet, SheetOption, SheetTrigger } from "../../components/AppBottomSheet";
+import { Chip, ChipGroup } from "../../components/Chip";
+import { Icon, iconSlot } from "../../components/Icon";
+import { ConnectivityBanner } from "../../components/ConnectivityBanner";
+import { EmptyState } from "../../components/EmptyState";
+import { ErrorState } from "../../components/ErrorState";
+import { MarketGridSkeleton } from "../../components/Skeleton";
+import { IconButton, TertiaryButton } from "../../components/buttons";
+import type { AppStackParamList, MainTabParamList } from "../../navigation/types";
+import { colors, layout, maxFontScale, radius, spacing, typography } from "../../theme";
+import { timeAgo } from "../shelf/timeAgo";
+import {
+  packTierClassLabel,
+  rarityLabel,
+  rarityOrder,
+  type PackTierClass,
+  type Rarity,
+} from "../shelf/packs";
+import { MarketplaceItemCard } from "./MarketplaceItemCard";
 import { loadMarket, type MarketListing } from "./board";
+import {
+  emptyMarketCopy,
+  selectListings,
+  type MarketCategoryFilter,
+  type MarketSort,
+} from "./select";
+
+const categoryChips: { id: MarketCategoryFilter; label: string }[] = [
+  { id: "ALL", label: "All" },
+  { id: "TRADING_CARD", label: "Cards" },
+  { id: "SNEAKER", label: "Sneakers" },
+  { id: "WATCH", label: "Watches" },
+];
+
+const priceChips: { id: PackTierClass; label: string }[] = [
+  { id: "entry", label: packTierClassLabel("entry") },
+  { id: "premium", label: packTierClassLabel("premium") },
+  { id: "grail", label: packTierClassLabel("grail") },
+];
+
+const sortChips: { id: MarketSort; label: string }[] = [
+  { id: "recent", label: "Recent" },
+  { id: "priceAsc", label: "Price: Low" },
+  { id: "priceDesc", label: "Price: High" },
+];
+
+const emptyListings: MarketListing[] = [];
 
 export function MarketScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<AppStackParamList>>();
+  const route = useRoute<RouteProp<MainTabParamList, "Market">>();
   const queryClient = useQueryClient();
-  const online = useOnline();
-  const [pendingId, setPendingId] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [unknown, setUnknown] = useState(false);
-  const addKey = useRef<string | null>(null);
-  const pendingListing = useRef<string | null>(null);
+  const { width } = useWindowDimensions();
+  const [search, setSearch] = useState("");
+  const [pickedCategory, setPickedCategory] = useState<MarketCategoryFilter>("ALL");
+  const category = route.params?.category ?? pickedCategory;
+  const [rarity, setRarity] = useState<Rarity | null>(null);
+  const [priceBand, setPriceBand] = useState<PackTierClass | null>(null);
+  const [belowFmv, setBelowFmv] = useState(false);
+  const [sort, setSort] = useState<MarketSort>("recent");
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [sortOpen, setSortOpen] = useState(false);
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const market = useQuery({
     queryKey: ["market"],
     queryFn: loadMarket,
@@ -46,6 +95,13 @@ export function MarketScreen() {
     }, [refresh]),
   );
 
+  function chooseCategory(next: MarketCategoryFilter) {
+    setPickedCategory(next);
+    if (route.params?.category) {
+      navigation.navigate("Tabs", { screen: "Market", params: {} });
+    }
+  }
+
   useEffect(() => {
     const appState = AppState.addEventListener("change", (next) => {
       if (next === "active") {
@@ -53,183 +109,262 @@ export function MarketScreen() {
       }
     });
     const stop = watchTables("market-listings", [{ table: "marketplace_listings" }], refresh);
+    const clock = setInterval(() => setNowMs(Date.now()), 30_000);
     return () => {
       appState.remove();
       stop();
+      clearInterval(clock);
     };
   }, [refresh]);
 
-  const addListing = useCallback((listing: MarketListing, remember: boolean) => {
-    if (!online || listing.isOwn || pendingId) {
-      return;
-    }
-    const idempotencyKey = remember || !addKey.current ? Crypto.randomUUID() : addKey.current;
-    if (remember) {
-      addKey.current = idempotencyKey;
-    }
-    pendingListing.current = listing.listingId;
-    setPendingId(listing.listingId);
-    setNotice("Adding to cart…");
-    void submitCart({
-      action: "addListing",
-      listingId: listing.listingId,
-      idempotencyKey,
-    }).then((snapshot) => {
-      addKey.current = null;
-      setUnknown(false);
-      queryClient.setQueryData(["cart"], snapshot);
-      navigation.navigate("Cart");
-    }).catch((error: unknown) => {
-      if (error instanceof CartUnknown) {
-        setUnknown(true);
-        setNotice("Adding to cart…\n\nThis may have completed.\nWe're checking before retrying.");
-        return;
-      }
-      addKey.current = null;
-      setUnknown(false);
-      setNotice(error instanceof CartRejected ? error.message : "That listing was not added. Refresh the market and try again.");
-    }).finally(() => {
-      setPendingId(null);
-    });
-  }, [navigation, online, pendingId, queryClient]);
+  const listings = market.data ?? emptyListings;
+  const visible = useMemo(
+    () => selectListings(listings, { search, category, rarity, priceBand, belowFmv, sort }),
+    [belowFmv, category, listings, priceBand, rarity, search, sort],
+  );
+  const extraFilters = (rarity ? 1 : 0) + (priceBand ? 1 : 0) + (belowFmv ? 1 : 0);
+  const sortLabel = sortChips.find((chip) => chip.id === sort)?.label ?? "Recent";
+  const showFmvFilter = listings.some((listing) => listing.currentValueCents !== null);
+  const columnGap = spacing.md;
+  const cardWidth = (width - layout.screenPadding * 2 - columnGap) / 2;
+  const artHeight = Math.round(cardWidth);
 
-  const listings = market.data ?? [];
-  const header = useMemo(() => (
-    <View>
-      <Pressable onPress={() => navigation.navigate("Shelf")}>
-        <Text style={styles.link}>Shelf</Text>
-      </Pressable>
-      <Text style={styles.title}>Market</Text>
-      <Text style={styles.notice}>Listings are not reserved. The seller can still change or remove one.</Text>
-      {!online ? (
-        <Text style={styles.notice}>You're offline. These listings may be out of date. Adding a listing stays disabled until the connection returns.</Text>
-      ) : null}
+  const header = (
+    <View style={styles.notices}>
+      <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.notice}>
+        Listings are not reserved. The seller can still change or remove one.
+      </Text>
+      <ConnectivityBanner offlineDetail="These listings may be out of date. Adding a listing stays disabled until the connection returns." />
       {market.isLoading ? (
-        <View>
-          <ActivityIndicator color="#e4c07a" />
-          <Text style={styles.notice}>Loading listings…</Text>
-        </View>
+        <MarketGridSkeleton artHeight={artHeight} width={cardWidth} />
       ) : null}
       {market.isError ? (
-        <View>
-          <Text style={styles.notice}>The market didn't load. Check the connection and try again.</Text>
-          <Pressable style={styles.primary} onPress={() => void market.refetch()}>
-            <Text style={styles.primaryLabel}>Try again</Text>
-          </Pressable>
-        </View>
+        <ErrorState
+          body="Check the connection and try again."
+          title="The market didn't load."
+          onRetry={() => void market.refetch()}
+        />
       ) : null}
-      {market.data && market.data.length === 0 ? (
-        <Text style={styles.notice}>No listings are for sale.</Text>
+      {market.data && visible.length === 0 ? (
+        <EmptyState
+          icon="storefront-outline"
+          title={emptyMarketCopy(listings, { search, category, rarity, priceBand, belowFmv, sort })}
+        />
       ) : null}
-      {notice ? <Text style={styles.notice}>{notice}</Text> : null}
     </View>
-  ), [market.data, market.isError, market.isLoading, navigation, notice, online]);
+  );
 
-  const footer = unknown ? (
-    <Pressable
-      style={styles.primary}
-      onPress={() => {
-        const listing = market.data?.find((candidate) => candidate.listingId === pendingListing.current);
-        if (listing) {
-          addListing(listing, false);
-        }
-      }}
-    >
-      <Text style={styles.primaryLabel}>Check again</Text>
-    </Pressable>
-  ) : null;
+  const openListing = useCallback((listingId: string) => {
+    navigation.navigate("MarketDetail", { listingId });
+  }, [navigation]);
 
   const renderListing = useCallback(({ item }: { item: MarketListing }) => (
-    <MarketRow
-      adding={pendingId === item.listingId}
-      disabled={!online || pendingId !== null || unknown}
+    <MarketplaceItemCard
+      artHeight={artHeight}
+      listedLabel={item.listedAt ? timeAgo(item.listedAt, nowMs) : null}
       listing={item}
-      onAdd={addListing}
+      width={cardWidth}
+      onOpen={openListing}
     />
-  ), [addListing, online, pendingId, unknown]);
+  ), [artHeight, cardWidth, nowMs, openListing]);
 
   return (
-    <FlatList
-      contentContainerStyle={styles.content}
-      data={listings}
-      extraData={`${pendingId ?? ""}:${online}:${unknown}`}
-      initialNumToRender={8}
-      keyExtractor={(listing) => listing.listingId}
-      ListFooterComponent={footer}
-      ListHeaderComponent={header}
-      maxToRenderPerBatch={8}
-      refreshControl={
-        <RefreshControl
-          refreshing={market.isRefetching && !market.isLoading}
-          tintColor="#e4c07a"
-          onRefresh={() => void market.refetch()}
+    <View style={styles.screen}>
+      <AppHeader cart title="Market" />
+      <View style={styles.filters}>
+        <View style={styles.search}>
+          <Icon color={colors.textTertiary} name="search-outline" size={18} />
+          <TextInput
+            accessibilityLabel="Search listings"
+            autoCapitalize="none"
+            autoCorrect={false}
+            maxFontSizeMultiplier={maxFontScale.body}
+            placeholder="Search listings"
+            placeholderTextColor={colors.textTertiary}
+            returnKeyType="search"
+            style={styles.searchInput}
+            value={search}
+            onChangeText={setSearch}
+          />
+          {search.length > 0 ? (
+            <IconButton
+              accessibilityLabel="Clear search"
+              icon={iconSlot("close-circle", 18)}
+              size="sm"
+              onPress={() => setSearch("")}
+            />
+          ) : null}
+        </View>
+        <ChipGroup accessibilityLabel="Listing category">
+          {categoryChips.map((chip) => (
+            <Chip
+              key={chip.id}
+              label={chip.label}
+              selected={category === chip.id}
+              onPress={() => chooseCategory(chip.id)}
+            />
+          ))}
+        </ChipGroup>
+        <View style={styles.toolbar}>
+          <SheetTrigger
+            label={extraFilters > 0 ? `Filters · ${extraFilters}` : "Filters"}
+            onPress={() => setFiltersOpen(true)}
+          />
+          <SheetTrigger label={`Sort · ${sortLabel}`} onPress={() => setSortOpen(true)} />
+        </View>
+      </View>
+      <FlatList
+        ListHeaderComponent={header}
+        columnWrapperStyle={styles.columns}
+        contentContainerStyle={styles.content}
+        data={visible}
+        extraData={`${nowMs}:${cardWidth}`}
+        initialNumToRender={8}
+        keyExtractor={(listing) => listing.listingId}
+        maxToRenderPerBatch={8}
+        numColumns={2}
+        refreshControl={
+          <RefreshControl
+            refreshing={market.isRefetching && !market.isLoading}
+            tintColor={colors.accent.solid}
+            onRefresh={() => void market.refetch()}
+          />
+        }
+        removeClippedSubviews={Platform.OS !== "web"}
+        renderItem={renderListing}
+        style={styles.screen}
+        windowSize={7}
+      />
+      <AppBottomSheet
+        title="Filters"
+        visible={filtersOpen}
+        onClose={() => setFiltersOpen(false)}
+        footer={
+          extraFilters > 0 ? (
+            <TertiaryButton
+              fullWidth
+              label="Clear filters"
+              onPress={() => {
+                setRarity(null);
+                setPriceBand(null);
+                setBelowFmv(false);
+                setFiltersOpen(false);
+              }}
+            />
+          ) : null
+        }
+      >
+        <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.sheetKicker}>Rarity</Text>
+        <SheetOption
+          label="Any rarity"
+          selected={rarity === null}
+          onPress={() => setRarity(null)}
         />
-      }
-      renderItem={renderListing}
-      style={styles.screen}
-      windowSize={7}
-    />
+        {rarityOrder.map((id) => (
+          <SheetOption
+            key={id}
+            label={rarityLabel(id)}
+            selected={rarity === id}
+            onPress={() => setRarity(id)}
+          />
+        ))}
+        <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.sheetKicker}>Price</Text>
+        <SheetOption
+          label="Any price"
+          selected={priceBand === null}
+          onPress={() => setPriceBand(null)}
+        />
+        {priceChips.map((chip) => (
+          <SheetOption
+            key={chip.id}
+            label={chip.label}
+            selected={priceBand === chip.id}
+            onPress={() => setPriceBand(chip.id)}
+          />
+        ))}
+        {showFmvFilter ? (
+          <SheetOption
+            detail="Listing price is under the catalog estimate"
+            label="Below FMV"
+            selected={belowFmv}
+            onPress={() => setBelowFmv((current) => !current)}
+          />
+        ) : null}
+      </AppBottomSheet>
+      <AppBottomSheet title="Sort" visible={sortOpen} onClose={() => setSortOpen(false)}>
+        {sortChips.map((chip) => (
+          <SheetOption
+            key={chip.id}
+            label={chip.label}
+            selected={sort === chip.id}
+            onPress={() => {
+              setSort(chip.id);
+              setSortOpen(false);
+            }}
+          />
+        ))}
+      </AppBottomSheet>
+    </View>
   );
 }
 
-const MarketRow = memo(function MarketRow({
-  listing,
-  adding,
-  disabled,
-  onAdd,
-}: {
-  listing: MarketListing;
-  adding: boolean;
-  disabled: boolean;
-  onAdd: (listing: MarketListing, remember: boolean) => void;
-}) {
-  return (
-    <View style={styles.card}>
-      <Text style={styles.category}>{categoryLabel(listing.category)}</Text>
-      <Text style={styles.name}>{listing.name}</Text>
-      <Text style={styles.meta}>{listing.rarity}</Text>
-      <Text style={styles.price}>{formatCents(listing.priceCents)}</Text>
-      <Text style={styles.meta}>Seller {listing.sellerUsername}</Text>
-      {listing.isOwn ? (
-        <Text style={styles.meta}>Your listing</Text>
-      ) : (
-        <Pressable
-          disabled={disabled}
-          style={[styles.primary, disabled && styles.disabled]}
-          onPress={() => onAdd(listing, true)}
-        >
-          <Text style={styles.primaryLabel}>{adding ? "Adding…" : "Add to cart"}</Text>
-        </Pressable>
-      )}
-    </View>
-  );
-});
-
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: "#12110f" },
-  content: { padding: 24, paddingTop: 48, paddingBottom: 48 },
-  link: { color: "#e4c07a" },
-  title: { color: "#f4efe6", fontSize: 28, fontWeight: "600", marginTop: 16 },
-  notice: { color: "#c9bfb2", lineHeight: 20, marginTop: 12 },
-  card: {
-    borderColor: "#2e2a26",
-    borderRadius: 16,
+  screen: {
+    flex: 1,
+    backgroundColor: colors.backgroundPrimary,
+  },
+  filters: {
+    gap: spacing.xs,
+    paddingHorizontal: layout.screenPadding,
+    paddingTop: spacing.xs,
+  },
+  toolbar: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  sheetKicker: {
+    ...typography.label,
+    color: colors.textTertiary,
+    marginTop: spacing.sm,
+  },
+  search: {
+    alignItems: "center",
+    backgroundColor: colors.surfacePrimary,
+    borderColor: colors.borderSubtle,
+    borderRadius: radius.button,
     borderWidth: 1,
-    marginTop: 16,
-    padding: 16,
+    flexDirection: "row",
+    gap: spacing.sm,
+    minHeight: layout.minTouchTarget,
+    paddingLeft: spacing.md,
+    paddingRight: spacing.xs,
   },
-  category: { color: "#a3988c", fontSize: 12, letterSpacing: 0.6, textTransform: "uppercase" },
-  name: { color: "#f4efe6", fontSize: 20, fontWeight: "600", marginTop: 8 },
-  meta: { color: "#c9bfb2", marginTop: 4 },
-  price: { color: "#e4c07a", fontSize: 22, fontWeight: "600", marginTop: 12 },
-  primary: {
-    alignSelf: "flex-start",
-    backgroundColor: "#e4c07a",
-    borderRadius: 999,
-    marginTop: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+  searchInput: {
+    ...typography.body,
+    color: colors.textPrimary,
+    flex: 1,
+    paddingVertical: spacing.sm,
   },
-  primaryLabel: { color: "#1a140c", fontWeight: "600" },
-  disabled: { opacity: 0.35 },
+  notices: {
+    gap: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  notice: {
+    ...typography.bodySmall,
+    color: colors.textSecondary,
+  },
+  status: {
+    gap: spacing.sm,
+  },
+  content: {
+    paddingBottom: spacing.xxl,
+    paddingHorizontal: layout.screenPadding,
+    paddingTop: spacing.md,
+  },
+  columns: {
+    gap: spacing.md,
+    marginBottom: spacing.md,
+  },
 });

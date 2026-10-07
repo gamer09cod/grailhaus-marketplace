@@ -1,19 +1,20 @@
 import { useCallback } from "react";
-import { useFocusEffect, useNavigation } from "@react-navigation/native";
-import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { useFocusEffect } from "@react-navigation/native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { AdminForbidden, loadAdminSnapshot } from "../../api/admin";
-import type { AppStackParamList } from "../../navigation/types";
+import { AppHeader } from "../../components/AppHeader";
+import { ConnectivityBanner } from "../../components/ConnectivityBanner";
+import { ErrorState } from "../../components/ErrorState";
+import { AdminSkeleton } from "../../components/Skeleton";
+import { colors, layout, maxFontScale, spacing, typography, useContentBottomPadding } from "../../theme";
 import { formatCents } from "../../utils/money";
 import { categoryLabel } from "../shelf/packs";
-import { useOnline } from "../shelf/useOnline";
 
 export function AdminScreen() {
-  const navigation = useNavigation<NativeStackNavigationProp<AppStackParamList>>();
   const queryClient = useQueryClient();
-  const online = useOnline();
+  const contentBottom = useContentBottomPadding();
   const snapshot = useQuery({
     queryKey: ["admin-snapshot"],
     queryFn: loadAdminSnapshot,
@@ -28,109 +29,89 @@ export function AdminScreen() {
   const numbers = snapshot.data;
 
   return (
-    <ScrollView
-      contentContainerStyle={styles.content}
-      refreshControl={
-        <RefreshControl
-          refreshing={snapshot.isRefetching && !snapshot.isLoading}
-          tintColor="#e4c07a"
-          onRefresh={() => void snapshot.refetch()}
-        />
-      }
-      style={styles.screen}
-    >
-      <View style={styles.header}>
-        <Text style={styles.brand}>Admin</Text>
-        <Pressable onPress={() => navigation.goBack()}>
-          <Text style={styles.link}>Back</Text>
-        </Pressable>
-      </View>
-      {!online ? <Text style={styles.notice}>You're offline. These numbers may be out of date.</Text> : null}
-      {snapshot.isLoading ? <ActivityIndicator color="#e4c07a" style={styles.spinner} /> : null}
-      {snapshot.isError ? (
-        <Text style={styles.notice}>
-          {snapshot.error instanceof AdminForbidden
-            ? snapshot.error.message
-            : "The admin numbers did not load."}
-        </Text>
-      ) : null}
-      {numbers ? (
-        <View>
-          <Row label="Packs sold" value={String(numbers.packsSold)} />
-          <Row label="Pack revenue" value={formatCents(numbers.packRevenueCents)} />
-          <Row label="Contents estimated payout" value={formatCents(numbers.contentsPayoutCents)} />
-          <Row label="Gross pack margin" value={formatCents(numbers.grossPackMarginCents)} />
-          <Row label="Marketplace fees collected" value={formatCents(numbers.marketplaceFeesCents)} />
-          <Text style={styles.section}>Margin per category</Text>
-          {numbers.categories.map((category) => (
-            <Row
-              key={category.category}
-              label={categoryLabel(category.category)}
-              value={formatCents(category.marginCents)}
+    <View style={styles.screen}>
+      <AppHeader back title="Admin" />
+      <ScrollView
+        contentContainerStyle={[styles.content, { paddingBottom: contentBottom }]}
+        refreshControl={
+          <RefreshControl
+            refreshing={snapshot.isRefetching && !snapshot.isLoading}
+            tintColor={colors.accent.solid}
+            onRefresh={() => void snapshot.refetch()}
+          />
+        }
+        style={styles.screen}
+      >
+        <ConnectivityBanner offlineDetail="These numbers may be out of date." />
+        {snapshot.isLoading ? <AdminSkeleton /> : null}
+        {snapshot.isError ? (
+          snapshot.error instanceof AdminForbidden ? (
+            <ErrorState title={snapshot.error.message} />
+          ) : (
+            <ErrorState
+              title="The admin numbers did not load."
+              onRetry={() => void snapshot.refetch()}
             />
-          ))}
-        </View>
-      ) : null}
-    </ScrollView>
+          )
+        ) : null}
+        {numbers ? (
+          <View>
+            <Row label="Packs sold" value={String(numbers.packsSold)} />
+            <Row label="Pack revenue" value={formatCents(numbers.packRevenueCents)} />
+            <Row label="Contents estimated payout" value={formatCents(numbers.contentsPayoutCents)} />
+            <Row label="Gross pack margin" value={formatCents(numbers.grossPackMarginCents)} />
+            <Row label="Marketplace fees collected" value={formatCents(numbers.marketplaceFeesCents)} />
+            <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.section}>Margin per category</Text>
+            {numbers.categories.map((category) => (
+              <Row
+                key={category.category}
+                label={categoryLabel(category.category)}
+                value={formatCents(category.marginCents)}
+              />
+            ))}
+          </View>
+        ) : null}
+      </ScrollView>
+    </View>
   );
 }
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
     <View style={styles.row}>
-      <Text style={styles.label}>{label}</Text>
-      <Text style={styles.value}>{value}</Text>
+      <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.label}>{label}</Text>
+      <Text maxFontSizeMultiplier={maxFontScale.display} style={styles.value}>{value}</Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   screen: {
+    backgroundColor: colors.backgroundPrimary,
     flex: 1,
-    backgroundColor: "#12110f",
   },
   content: {
-    padding: 24,
-    paddingBottom: 48,
-  },
-  header: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginTop: 24,
-  },
-  brand: {
-    color: "#f4efe6",
-    fontSize: 22,
-    fontWeight: "600",
-  },
-  link: {
-    color: "#e4c07a",
-  },
-  notice: {
-    color: "#e4c07a",
-    marginTop: 16,
-  },
-  spinner: {
-    marginTop: 24,
+    paddingHorizontal: layout.screenPadding,
+    paddingTop: spacing.sm,
   },
   section: {
-    color: "#f4efe6",
-    fontSize: 18,
-    marginTop: 28,
+    ...typography.heading,
+    color: colors.textPrimary,
+    marginTop: spacing.xl,
   },
   row: {
-    borderBottomColor: "#2a2723",
+    borderBottomColor: colors.borderSubtle,
     borderBottomWidth: 1,
-    marginTop: 16,
-    paddingBottom: 12,
+    marginTop: spacing.base,
+    paddingBottom: spacing.md,
   },
   label: {
-    color: "#c9bfb2",
+    ...typography.bodySmall,
+    color: colors.textSecondary,
   },
   value: {
-    color: "#f4efe6",
-    fontSize: 22,
-    marginTop: 4,
+    ...typography.money,
+    color: colors.textPrimary,
+    marginTop: spacing.xs,
   },
 });

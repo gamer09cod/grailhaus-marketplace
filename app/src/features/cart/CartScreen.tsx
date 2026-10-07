@@ -1,18 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useFocusEffect, useNavigation } from "@react-navigation/native";
+import { useFocusEffect, useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import type { RouteProp } from "@react-navigation/native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Crypto from "expo-crypto";
-import {
-  ActivityIndicator,
-  AppState,
-  Pressable,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from "react-native";
+import { AppState, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import {
   CartRejected,
@@ -20,7 +13,6 @@ import {
   loadCart,
   submitCart,
   type CartLine,
-  type CartSnapshot,
 } from "../../api/cart";
 import {
   CheckoutRejected,
@@ -30,24 +22,44 @@ import {
   rememberInflightCheckout,
   submitCheckout,
 } from "../../api/checkout";
-import { centsFromWire } from "../../utils/money";
 import { watchTables } from "../../api/live";
+import { AppHeader } from "../../components/AppHeader";
+import { ConnectivityBanner } from "../../components/ConnectivityBanner";
+import { EmptyState } from "../../components/EmptyState";
+import { ErrorState } from "../../components/ErrorState";
+import { InlineStatusCard } from "../../components/InlineStatusCard";
+import { RecoveryAction } from "../../components/RecoveryAction";
+import { CartLineSkeleton } from "../../components/Skeleton";
+import { PrimaryButton } from "../../components/buttons";
+import type { IconName } from "../../components/Icon";
+import type { StatusKey } from "../../theme";
 import type { AppStackParamList } from "../../navigation/types";
-import { formatCents } from "../../utils/money";
-import { categoryLabel } from "../shelf/packs";
+import { colors, layout, spacing, typography } from "../../theme";
+import { centsFromWire, formatCents } from "../../utils/money";
 import { useOnline } from "../shelf/useOnline";
-import { holdHasEnded, remainingLabel } from "./countdown";
+import { useWalletBalance } from "../wallet/useWalletBalance";
+import { CartLineItem } from "./CartLineItem";
+import { CartSummary } from "./CartSummary";
+import { ReviewPurchaseView } from "./ReviewPurchaseView";
+import { cartBreakdown, payableTotal } from "./cartTotals";
+import { holdHasEnded } from "./countdown";
+import { captureReview, reviewChanges, reviewFromPayment, type ReviewSnapshot } from "./reviewSnapshot";
 
 export function CartScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<AppStackParamList>>();
+  const route = useRoute<RouteProp<AppStackParamList, "Cart">>();
   const queryClient = useQueryClient();
+  const insets = useSafeAreaInsets();
   const online = useOnline();
+  const wallet = useWalletBalance();
   const [notice, setNotice] = useState<string | null>(null);
   const [openPackIds, setOpenPackIds] = useState<string[]>([]);
   const [pendingLineId, setPendingLineId] = useState<string | null>(null);
   const [awaitingResult, setAwaitingResult] = useState(false);
   const [paying, setPaying] = useState(false);
   const [awaitingPayment, setAwaitingPayment] = useState(false);
+  const [reviewing, setReviewing] = useState(false);
+  const [reviewed, setReviewed] = useState<ReviewSnapshot | null>(null);
   const inflight = useRef<LineCartAction | null>(null);
   const payment = useRef<PaymentRequest | null>(null);
   const payingLock = useRef(false);
@@ -67,6 +79,12 @@ export function CartScreen() {
       refreshCart();
     }, [refreshCart]),
   );
+
+  useEffect(() => {
+    if (reviewing && route.params?.startReview) {
+      navigation.setParams({ startReview: false });
+    }
+  }, [navigation, reviewing, route.params?.startReview]);
 
   useEffect(() => {
     const appState = AppState.addEventListener("change", (next) => {
@@ -154,6 +172,7 @@ export function CartScreen() {
       await rememberInflightCheckout(storedPayment(request));
     }
     setPaying(true);
+    setReviewing(true);
     setNotice("Confirming purchase…");
     try {
       const receipt = await submitCheckout(request);
@@ -196,26 +215,42 @@ export function CartScreen() {
   }
 
   function startPayment() {
-    if (!online || payingLock.current) {
+    if (!online || payingLock.current || !reviewed) {
       return;
     }
     const snapshot = cart.data;
-    const total = snapshot ? payableTotal(snapshot.lines) : null;
-    if (!snapshot?.cartId || total === null) {
+    if (!snapshot?.cartId || reviewChanges(reviewed, snapshot.lines).length > 0) {
       return;
     }
     payingLock.current = true;
     const request = payment.current ?? {
       cartId: snapshot.cartId,
       idempotencyKey: Crypto.randomUUID(),
-      expectedTotalCents: total,
-      lines: snapshot.lines.map((line) => ({
+      expectedTotalCents: reviewed.totalCents,
+      lines: reviewed.lines.map((line) => ({
         lineId: line.lineId,
         quantity: line.quantity,
-        snapshotPriceCents: line.snapshotPriceCents,
+        snapshotPriceCents: line.priceCents,
       })),
     };
     void runPayment(request, payment.current === null);
+  }
+
+  function enterReview() {
+    const captured = cart.data ? captureReview(cart.data.lines) : null;
+    if (!captured) {
+      return;
+    }
+    setReviewed(captured);
+    setReviewing(true);
+  }
+
+  function leaveReview() {
+    if (paying || awaitingPayment) {
+      return;
+    }
+    setReviewing(false);
+    setReviewed(null);
   }
 
   useEffect(() => {
@@ -240,6 +275,8 @@ export function CartScreen() {
       payment.current = request;
       payingLock.current = true;
       setAwaitingPayment(true);
+      setReviewing(true);
+      setReviewed(cart.data ? captureReview(cart.data.lines) ?? reviewFromPayment(request, cart.data.lines) : reviewFromPayment(request, []));
       setNotice("Confirming purchase…\n\nYour order may have completed.\nWe're checking before retrying.");
       void runPayment(request, false);
     });
@@ -247,243 +284,179 @@ export function CartScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [online]);
 
-  return (
-    <ScrollView
-      contentContainerStyle={styles.content}
-      refreshControl={
-        <RefreshControl
-          refreshing={cart.isRefetching && !cart.isLoading}
-          tintColor="#e4c07a"
-          onRefresh={() => void cart.refetch()}
-        />
-      }
-      style={styles.screen}
-    >
-      <View style={styles.headerLinks}>
-        <Pressable onPress={() => navigation.navigate("Shelf")}>
-          <Text style={styles.link}>Shelf</Text>
-        </Pressable>
-        <Pressable onPress={() => navigation.navigate("Market")}>
-          <Text style={styles.link}>Market</Text>
-        </Pressable>
-      </View>
-      <Text style={styles.title}>Cart</Text>
-      {!online ? (
-        <Text style={styles.notice}>You're offline. This cart may be out of date. Reservations stay disabled until the connection returns.</Text>
-      ) : null}
-      {cart.isLoading ? (
-        <View>
-          <ActivityIndicator color="#e4c07a" />
-          <Text style={styles.notice}>Loading your cart…</Text>
-        </View>
-      ) : null}
-      {cart.isError ? (
-        <View>
-          <Text style={styles.notice}>Your cart didn't load. Check the connection and try again.</Text>
-          <Pressable style={styles.primary} onPress={() => void cart.refetch()}>
-            <Text style={styles.primaryLabel}>Try again</Text>
-          </Pressable>
-        </View>
-      ) : null}
-      {cart.data && cart.data.lines.length === 0 ? (
-        <Text style={styles.notice}>Your cart is empty.{"\n\n"}Browse the shelf or the market.</Text>
-      ) : null}
-      {notice ? <Text style={styles.notice}>{notice}</Text> : null}
-      {openPackIds.length > 0 ? (
-        <Pressable
-          style={styles.primary}
-          onPress={() => navigation.navigate("Reveal", { purchasedPackIds: openPackIds })}
-        >
-          <Text style={styles.primaryLabel}>
-            {openPackIds.length === 1 ? "Open pack" : `Open ${openPackIds.length} packs`}
-          </Text>
-        </Pressable>
-      ) : null}
-      {awaitingResult ? (
-        <Pressable
-          style={styles.primary}
-          onPress={() => {
-            const action = inflight.current;
-            if (action) {
-              void runLineAction(action, false);
-            }
-          }}
-        >
-          <Text style={styles.primaryLabel}>Check again</Text>
-        </Pressable>
-      ) : null}
-      {awaitingPayment ? (
-        <Pressable
-          style={styles.primary}
-          onPress={() => {
-            const request = payment.current;
-            if (request) {
-              void runPayment(request, false);
-            }
-          }}
-        >
-          <Text style={styles.primaryLabel}>Check again</Text>
-        </Pressable>
-      ) : null}
-      {cart.data && payableTotal(cart.data.lines) !== null ? (
-        <Pressable
-          disabled={!online || paying || pendingLineId !== null || awaitingPayment}
-          style={[styles.primary, (!online || paying || pendingLineId !== null || awaitingPayment) && styles.disabled]}
-          onPress={startPayment}
-        >
-          <Text style={styles.primaryLabel}>
-            {paying ? "Confirming purchase…" : `Pay ${formatCents(payableTotal(cart.data.lines) ?? 0n)}`}
-          </Text>
-        </Pressable>
-      ) : null}
-      {cart.data?.lines.map((line) => (
-        <CartLineCard
-          key={line.lineId}
-          line={line}
-          snapshot={cart.data}
-          busy={pendingLineId === line.lineId}
-          disabled={!online || pendingLineId !== null || paying || awaitingPayment}
-          onAccept={() => startLineAction(line, line.lineType === "PACK" ? "acceptPrice" : "acceptListingPrice")}
-          onRemove={() => startLineAction(line, "release")}
-          onRetry={() => startLineAction(line, "retry")}
-          onBrowseMarket={() => navigation.navigate("Market")}
-        />
-      ))}
-    </ScrollView>
-  );
-}
-
-function HoldCountdown({
-  expiresAt,
-  serverNow,
-  fetchedAtMs,
-}: {
-  expiresAt: string;
-  serverNow: string;
-  fetchedAtMs: number;
-}) {
-  const [nowMs, setNowMs] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = setInterval(() => setNowMs(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, []);
-  return <Text style={styles.hold}>{remainingLabel(expiresAt, serverNow, fetchedAtMs, nowMs)}</Text>;
-}
-
-function CartLineCard({
-  line,
-  snapshot,
-  busy,
-  disabled,
-  onAccept,
-  onRemove,
-  onRetry,
-  onBrowseMarket,
-}: {
-  line: CartLine;
-  snapshot: CartSnapshot;
-  busy: boolean;
-  disabled: boolean;
-  onAccept: () => void;
-  onRemove: () => void;
-  onRetry: () => void;
-  onBrowseMarket: () => void;
-}) {
-  if (line.lineType === "MARKETPLACE_LISTING") {
-    return (
-      <View style={styles.card}>
-        <Text style={styles.category}>{categoryLabel(line.category)}</Text>
-        <Text style={styles.name}>{line.name}</Text>
-        <Text style={styles.meta}>Seller {line.sellerUsername}</Text>
-        <Text style={styles.meta}>Shown price {formatCents(line.snapshotPriceCents)}</Text>
-        <Text style={styles.meta}>Current price {formatCents(line.currentPriceCents)}</Text>
-        <Text style={styles.meta}>{availabilityLabel(line.availability)}</Text>
-        {line.state === "LISTING_PRICE_CHANGED" ? (
-          <View>
-            <Text style={styles.warning}>Seller changed the price.</Text>
-            <Text style={styles.meta}>Previous price: {formatCents(line.snapshotPriceCents)}</Text>
-            <Text style={styles.meta}>Current price: {formatCents(line.currentPriceCents)}</Text>
-            <ActionButton disabled={disabled} label={busy ? "Confirming…" : "Accept New Price"} onPress={onAccept} />
-          </View>
-        ) : null}
-        {line.state === "LISTING_SOLD" ? (
-          <View>
-            <Text style={styles.warning}>This listing has already sold.</Text>
-            <Text style={styles.meta}>Browse similar listings or remove it from your cart.</Text>
-            <ActionButton disabled={false} label="Browse Marketplace" onPress={onBrowseMarket} />
-          </View>
-        ) : null}
-        {line.state === "LISTING_DELISTED" ? (
-          <View>
-            <Text style={styles.warning}>The seller removed this listing.</Text>
-            <Text style={styles.meta}>Remove it from your cart, or browse what is still for sale.</Text>
-            <ActionButton disabled={false} label="Browse Marketplace" onPress={onBrowseMarket} />
-          </View>
-        ) : null}
-        <Pressable disabled={disabled} onPress={onRemove}>
-          <Text style={[styles.remove, disabled && styles.disabled]}>{busy ? "Removing…" : "Remove"}</Text>
-        </Pressable>
-      </View>
-    );
+  const snapshot = cart.data;
+  const wantsReview = route.params?.startReview === true;
+  if (wantsReview && snapshot && !reviewing && !paying && !awaitingPayment) {
+    const captured = captureReview(snapshot.lines);
+    if (captured) {
+      setReviewed(captured);
+      setReviewing(true);
+    }
   }
+  const lines = snapshot?.lines ?? [];
+  const breakdown = cartBreakdown(lines);
+  const liveTotal = payableTotal(lines);
+  const reviewedTotal = reviewed?.totalCents ?? liveTotal;
+  const balance = wallet.data;
+  const after = balance !== undefined && reviewedTotal !== null ? balance - reviewedTotal : null;
+  const short = after !== null && after < 0n;
+  const changes = reviewed ? reviewChanges(reviewed, lines) : [];
+  const canEnterReview = online && liveTotal !== null && !paying && pendingLineId === null && !awaitingPayment && !short;
+  const canConfirm = online && reviewed !== null && changes.length === 0 && !paying && !awaitingPayment && !short;
+  const cartBusy = !online || pendingLineId !== null || paying || awaitingPayment;
 
   return (
-    <View style={styles.card}>
-      <Text style={styles.category}>{categoryLabel(line.category)}</Text>
-      <Text style={styles.name}>{line.name}</Text>
-      <Text style={styles.meta}>{line.tier} · {line.quantity} packs</Text>
-      <Text style={styles.meta}>Shown price {formatCents(line.snapshotPriceCents)}</Text>
-      <Text style={styles.meta}>Current price {formatCents(line.currentPriceCents)}</Text>
-      <Text style={styles.meta}>{line.availableQuantity.toString()} available</Text>
-      {line.state === "VALID" && line.expiresAt ? (
-        <HoldCountdown expiresAt={line.expiresAt} fetchedAtMs={snapshot.fetchedAtMs} serverNow={snapshot.serverNow} />
-      ) : null}
-      {line.state === "EXPIRED" ? (
-        <View>
-          <Text style={styles.warning}>Reservation expired</Text>
-          <Text style={styles.meta}>These packs are no longer reserved.</Text>
-          <ActionButton disabled={disabled} label={busy ? "Confirming…" : "Try Again"} onPress={onRetry} />
+    <View style={styles.screen}>
+      <AppHeader
+        back={reviewing ? leaveReview : true}
+        title={reviewing ? "Review Purchase" : "Cart"}
+      />
+      <ScrollView
+        contentContainerStyle={styles.content}
+        refreshControl={
+          <RefreshControl
+            refreshing={cart.isRefetching && !cart.isLoading}
+            tintColor={colors.accent.solid}
+            onRefresh={() => void cart.refetch()}
+          />
+        }
+        style={styles.scroll}
+      >
+        <ConnectivityBanner offlineDetail="This cart may be out of date. Reservations stay disabled until the connection returns." />
+        {cart.isLoading ? <CartLineSkeleton /> : null}
+        {cart.isError ? (
+          <ErrorState
+            body="Check the connection and try again."
+            motion="financial"
+            title="Your cart didn't load."
+            onRetry={() => void cart.refetch()}
+          />
+        ) : null}
+        {snapshot && snapshot.lines.length === 0 && openPackIds.length === 0 ? (
+          <EmptyState
+            body="Browse the shelf or the market."
+            icon="cart-outline"
+            primaryAction={{
+              label: "Browse Packs",
+              motion: "financial",
+              onPress: () => navigation.navigate("Tabs", { screen: "Packs" }),
+            }}
+            secondaryAction={{
+              label: "Browse Market",
+              motion: "financial",
+              onPress: () => navigation.navigate("Tabs", { screen: "Market" }),
+            }}
+            title="Your cart is empty."
+          />
+        ) : null}
+        {notice ? (
+          <InlineStatusCard
+            {...noticeParts(notice)}
+            action={
+              awaitingResult
+                ? {
+                    label: "Check again",
+                    motion: "financial",
+                    variant: "secondary",
+                    onPress: () => {
+                      const action = inflight.current;
+                      if (action) {
+                        void runLineAction(action, false);
+                      }
+                    },
+                  }
+                : undefined
+            }
+            icon={noticeIcon(notice, awaitingResult)}
+            tone={noticeTone(notice, awaitingResult)}
+          />
+        ) : null}
+        {openPackIds.length > 0 ? (
+          <PrimaryButton
+            label={openPackIds.length === 1 ? "Open pack" : `Open ${openPackIds.length} packs`}
+            motion="financial"
+            onPress={() => navigation.navigate("Reveal", { purchasedPackIds: openPackIds })}
+          />
+        ) : null}
+        {reviewing && reviewed ? (
+          <ReviewPurchaseView
+            after={after}
+            balance={balance}
+            changes={changes}
+            reviewed={reviewed}
+            short={short}
+            onReviewCart={leaveReview}
+          />
+        ) : (
+          <>
+            {snapshot ? (
+              <View style={styles.list}>
+                {snapshot.lines.map((line) => (
+                  <CartLineItem
+                    key={line.lineId}
+                    busy={pendingLineId === line.lineId}
+                    disabled={cartBusy}
+                    line={line}
+                    snapshot={snapshot}
+                    onAccept={() => startLineAction(line, line.lineType === "PACK" ? "acceptPrice" : "acceptListingPrice")}
+                    onBrowseMarket={() => navigation.navigate("Tabs", { screen: "Market" })}
+                    onRemove={() => startLineAction(line, "release")}
+                    onRetry={() => startLineAction(line, "retry")}
+                  />
+                ))}
+              </View>
+            ) : null}
+            {lines.length > 0 ? (
+              <CartSummary
+                after={after}
+                balance={balance}
+                marketCents={breakdown.marketCents}
+                packCents={breakdown.packCents}
+                short={short}
+                totalCents={breakdown.totalCents}
+              />
+            ) : null}
+          </>
+        )}
+      </ScrollView>
+      {lines.length > 0 && openPackIds.length === 0 ? (
+        <View style={[styles.ctaBar, { paddingBottom: Math.max(insets.bottom, spacing.sm) }]}>
+          {awaitingPayment ? (
+            <RecoveryAction
+              fullWidth
+              label="Check again"
+              motion="financial"
+              variant="secondary"
+              onPress={() => {
+                const request = payment.current;
+                if (request) {
+                  void runPayment(request, false);
+                }
+              }}
+            />
+          ) : reviewing ? (
+            <PrimaryButton
+              disabled={!canConfirm}
+              fullWidth
+              label={`Confirm Purchase · ${formatCents(reviewed?.totalCents ?? 0n)}`}
+              loading={paying}
+              loadingLabel="Confirming purchase…"
+              motion="financial"
+              onPress={startPayment}
+            />
+          ) : (
+            <PrimaryButton
+              disabled={!canEnterReview}
+              fullWidth
+              label="Review Purchase"
+              motion="financial"
+              onPress={enterReview}
+            />
+          )}
         </View>
       ) : null}
-      {line.state === "PRICE_CHANGED" ? (
-        <View>
-          <Text style={styles.warning}>The pack price changed.</Text>
-          <Text style={styles.meta}>Previous price: {formatCents(line.snapshotPriceCents)}</Text>
-          <Text style={styles.meta}>Current price: {formatCents(line.currentPriceCents)}</Text>
-          <ActionButton disabled={disabled} label={busy ? "Confirming…" : "Accept New Price"} onPress={onAccept} />
-        </View>
-      ) : null}
-      {line.state === "PARTIALLY_AVAILABLE" ? (
-        <Text style={styles.warning}>
-          Only {line.availableQuantity.toString()} are available. This line is unchanged.{"\n\n"}Remove it, then reserve {line.availableQuantity.toString()} from the shelf.
-        </Text>
-      ) : null}
-      {line.state === "SOLD_OUT" ? (
-        <Text style={styles.warning}>That pack is sold out.{"\n\n"}Remove it from your cart.</Text>
-      ) : null}
-      <Pressable disabled={disabled} onPress={onRemove}>
-        <Text style={[styles.remove, disabled && styles.disabled]}>{busy ? "Removing…" : "Remove"}</Text>
-      </Pressable>
     </View>
   );
-}
-
-function ActionButton({ label, onPress, disabled }: { label: string; onPress: () => void; disabled: boolean }) {
-  return (
-    <Pressable disabled={disabled} style={[styles.primary, disabled && styles.disabled]} onPress={onPress}>
-      <Text style={styles.primaryLabel}>{label}</Text>
-    </Pressable>
-  );
-}
-
-function availabilityLabel(availability: "AVAILABLE" | "SOLD" | "DELISTED"): string {
-  if (availability === "AVAILABLE") {
-    return "Available";
-  }
-  if (availability === "SOLD") {
-    return "Sold";
-  }
-  return "Not available";
 }
 
 type LineCartAction = {
@@ -498,20 +471,6 @@ type PaymentRequest = {
   expectedTotalCents: bigint;
   lines: { lineId: string; quantity: number; snapshotPriceCents: bigint }[];
 };
-
-function payableTotal(lines: CartLine[]): bigint | null {
-  if (lines.length === 0) {
-    return null;
-  }
-  let total = 0n;
-  for (const line of lines) {
-    if (line.state !== "VALID" || line.snapshotPriceCents !== line.currentPriceCents) {
-      return null;
-    }
-    total += line.snapshotPriceCents * BigInt(line.quantity);
-  }
-  return total;
-}
 
 function storedPayment(request: PaymentRequest): {
   cartId: string;
@@ -541,8 +500,11 @@ function checkoutNotice(error: unknown): string {
   if (error.code === "LISTING_DELISTED") {
     return "The seller removed this listing.\n\nRemove it from your cart.";
   }
-  if (error.code === "LISTING_PRICE_CHANGED" || error.code === "CART_CHANGED" || error.code === "CHECKOUT_TOTAL_CHANGED") {
-    return "Your cart changed\n\nSome items are no longer available or their price changed.\nReview your cart before paying.";
+  if (error.code === "CART_CHANGED" || error.code === "LISTING_PRICE_CHANGED") {
+    return "Your cart changed\n\nOne or more items changed since you reviewed your order.";
+  }
+  if (error.code === "CHECKOUT_TOTAL_CHANGED") {
+    return "The total changed. Review your cart before paying.";
   }
   if (error.code === "SOLD_OUT") {
     return "That pack is sold out.\n\nRemove it from your cart.";
@@ -569,34 +531,76 @@ function messageFor(error: unknown): string {
   return "The cart action was rejected.";
 }
 
+function noticeParts(notice: string): { title: string; body?: string } {
+  const blank = notice.split("\n\n");
+  const head = blank[0]?.trim() ?? notice;
+  if (blank.length > 1) {
+    return { title: head, body: blank.slice(1).join("\n\n").trim() };
+  }
+  const lines = notice.split("\n").map((line) => line.trim()).filter(Boolean);
+  const first = lines[0] ?? notice;
+  if (lines.length <= 1) {
+    return { title: first };
+  }
+  return { title: first, body: lines.slice(1).join("\n") };
+}
+
+function noticeTone(notice: string, awaiting: boolean): StatusKey {
+  if (awaiting) {
+    return "warning";
+  }
+  if (notice.startsWith("Paid ")) {
+    return "success";
+  }
+  if (notice.startsWith("Confirming")) {
+    return "info";
+  }
+  return "warning";
+}
+
+function noticeIcon(notice: string, awaiting: boolean): IconName {
+  if (awaiting) {
+    return "help-circle-outline";
+  }
+  if (notice.startsWith("Paid ")) {
+    return "checkmark-circle-outline";
+  }
+  if (notice.startsWith("Confirming")) {
+    return "time-outline";
+  }
+  return "alert-circle-outline";
+}
+
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: "#12110f" },
-  content: { padding: 24, paddingTop: 48, paddingBottom: 48 },
-  headerLinks: { flexDirection: "row", gap: 16 },
-  link: { color: "#e4c07a" },
-  title: { color: "#f4efe6", fontSize: 28, fontWeight: "600", marginTop: 16, marginBottom: 8 },
-  notice: { color: "#c9bfb2", lineHeight: 20, marginTop: 12 },
-  card: {
-    borderColor: "#2e2a26",
-    borderRadius: 16,
-    borderWidth: 1,
-    marginTop: 16,
-    padding: 16,
+  screen: {
+    flex: 1,
+    backgroundColor: colors.backgroundPrimary,
   },
-  category: { color: "#a3988c", fontSize: 12, letterSpacing: 0.6, textTransform: "uppercase" },
-  name: { color: "#f4efe6", fontSize: 20, fontWeight: "600", marginTop: 8 },
-  meta: { color: "#c9bfb2", marginTop: 4 },
-  hold: { color: "#e4c07a", fontSize: 18, fontWeight: "600", marginTop: 12 },
-  warning: { color: "#f4efe6", marginTop: 12 },
-  primary: {
-    alignSelf: "flex-start",
-    backgroundColor: "#e4c07a",
-    borderRadius: 999,
-    marginTop: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+  scroll: {
+    flex: 1,
   },
-  primaryLabel: { color: "#1a140c", fontWeight: "600" },
-  remove: { color: "#e4c07a", marginTop: 16 },
-  disabled: { opacity: 0.4 },
+  content: {
+    gap: spacing.base,
+    paddingBottom: layout.stickyCtaClearance,
+    paddingHorizontal: layout.screenPadding,
+    paddingTop: spacing.sm,
+  },
+  notice: {
+    ...typography.bodySmall,
+    color: colors.textSecondary,
+  },
+  block: {
+    gap: spacing.sm,
+  },
+  list: {
+    gap: spacing.base,
+  },
+  ctaBar: {
+    backgroundColor: colors.backgroundSecondary,
+    borderTopColor: colors.borderSubtle,
+    borderTopWidth: 1,
+    gap: spacing.sm,
+    paddingHorizontal: layout.screenPadding,
+    paddingTop: spacing.md,
+  },
 });

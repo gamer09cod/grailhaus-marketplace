@@ -73,7 +73,7 @@ Seeded test accounts start at **$10,000** = `1000000` cents.
 
 That balance is a `DEPOSIT` ledger row plus the cached wallet balance, written together. It is not a wallet update without a ledger entry.
 
-Users may also make mock deposits (`$100`, `$500`, `$1,000`, and a custom amount from `$0.01` to `$1,000,000`). Deposit is atomic: ledger insert and cached balance update commit together, or neither does. Deposit accepts an idempotency key. A retry of the same key does not credit the wallet twice.
+Users may also make mock deposits (`$100`, `$500`, `$1,000`, and a custom amount from `$0.01` to `$1,000,000`). Presets fill the amount in a deposit sheet; the footer confirms. Deposit is atomic: ledger insert and cached balance update commit together, or neither does. Deposit accepts an idempotency key. A retry of the same key does not credit the wallet twice.
 
 ### Pack reservations
 
@@ -145,7 +145,7 @@ Availability, seller, and price are revalidated inside the checkout transaction.
 
 `marketplace_board` returns active listings with name, category, rarity, price, seller, `isOwn`, `listedAt`, `imageUrl`, and `currentValueCents`. The catalog estimate is FMV. The market calls `apply_price_drift` before that read, same as portfolio and reveal. A listing priced below that estimate can show `{n}% below market`. The client does not invent a discount.
 
-Search and filters run on the loaded board. There is no server catalog search. Advanced filters use chips. Bottom sheets wait for the sheet component.
+Search and filters run on the loaded board. There is no server catalog search. Category chips stay on the board. Extra filters and sort open `AppBottomSheet` (Modal-based so Expo web works without reanimated).
 
 Favorites are omitted. There is no favorite store.
 
@@ -204,6 +204,8 @@ Rules:
 
 ### Reveal
 
+Reveal is a dedicated near-black stage, not marketplace chrome. The sealed sleeve sits centered with subtle trading-card accent light. High-rarity pulls get a longer hold, a rarity-colored glow, and a few spark dots — not constant particles. Reduce motion still fades instead of traveling.
+
 Pack contents are chosen in the checkout transaction and inserted into `pack_contents` before commit.
 
 The reveal animation plays that stored order. It does not roll, reroll, or reorder by rarity.
@@ -222,7 +224,7 @@ Closing the app, replaying the animation, or calling an API again must not chang
 
 A drag that has not stored `OPEN` is dropped when the app backgrounds. The sleeve returns to sealed and that gesture does not call the server. A tear that already called the server keeps its stored step. Reopening an `OPEN`, `REVEALING_CARD`, or `CARD_REVEALED` pack shows the stored card and writes only the missing forward steps. A finished multi-pack purchase opens on the summary. Packs after the interrupted one stay sealed.
 
-A multi-pack purchase opens in checkout order. The first two trading-card packs use the full tear. From the third pack, Fast Open is a press, not a timer. It plays a short tear and the stored card, then a fan of cards already opened. Epic and legendary cards interrupt that pace. The summary after the last pack adds acquisition prices and catalog values as integer cents. One pack does not show the summary.
+A multi-pack purchase opens in checkout order. The first two trading-card packs use the full tear. From the third pack, the screen offers `Speed up remaining packs?` with **Fast Open**. Fast Open is a press, not a timer. It plays a short tear and the stored card, then a fan of cards already opened (with Best marked). Epic and legendary cards interrupt that pace with a premium hold; Rare stays on the fast path. The summary after the last pack shows packs opened, total spent, collection value (catalog cents), and best pull (name, rarity, cents). One pack does not show the summary.
 
 Reduce motion follows the system setting. It replaces the sleeve travel and the long hold with a fade and a scale from 0.96 to 1. The same reveal steps still store the same card. `Reveal next card` opens a sealed pack in that mode. `Skip animation` ends the hold early and still writes the next forward step. Haptics off skips the motor cues. The rarity, name, and estimated value stay on screen. A revealed card is announced as `{Rarity} card revealed. {Name}. Estimated value {spoken cents}.` Whole dollars are spoken as dollars. A remainder is spoken from the integer cents. The action after a card, when another pack remains, is `Reveal next card`.
 
@@ -235,6 +237,54 @@ Total portfolio value is the sum of `catalog_items.current_value_cents`. P&L is 
 Filters are Cards, Sneakers, Watches, Listed, plus All. Sort is Value, P&L, or Recently Acquired. Ties keep the newer holding first. The grid shows generated art or a stored image, the name, rarity, current value, all-time P&L, and a LISTED badge with the listing price when the item is for sale.
 
 Tapping a holding opens the existing listing screen for details, list, edit, and delist. Sealed packs stay above the grid and open Reveal.
+
+A portfolio with no opened items and no sealed packs is an invitation, not an error. Copy is `Start your collection` / `Open your first pack or purchase a collectible from the market.` Primary is Explore Packs. Secondary is Browse Market. The $0.00 summary and filter chips stay hidden until a holding exists. Filter-empty copy (nothing in a category, none listed) and sealed-only copy stay as they are.
+
+### Profile
+
+Profile is the account home. Identity is the sign-in email plus `profiles.username`. The summary is live wallet balance, current portfolio catalog value, and active listing count. It is not a P&L chart.
+
+Activity is the signed-in user's own `ledger_entries` (RLS). Labels are Deposit, Pack purchase, Marketplace purchase, Sale, Refund, and Balance adjustment. Amounts are integer cents. Tapping a row opens a transaction sheet (type, amount, when) with no invented fields. Purchases are the user's own `purchases` rows. Support is in-app help copy. There is no live support queue and no ticket form.
+
+Haptics stays a Settings toggle. QA and Admin stay reviewer-gated. Sign out stays on Profile.
+
+### Motion
+
+Motion explains state changes. Discovery cards and chips use a light press scale (`0.98`) via `usePressMotion("discovery")`. Financial surfaces and reduced motion keep layout still (opacity only, no travel, no scale). Cart status banners fade in with the financial enter duration; they never delay checkout. Bottom sheets follow the same split. Reveal timings stay in `features/reveal/*` and are documented on `revealMotion` only. No bouncing CTAs, pulsing accents, parallax, or money that appears to move on its own.
+
+### Loading skeletons
+
+First load uses layout skeletons (`SkeletonBone` and composed card/list skeletons) instead of a spinner plus “Loading…” sentence. Discovery skeletons may pulse opacity; financial and reduced-motion skeletons stay still so money never appears to move. Pull-to-refresh keeps the system control. Button, auth, and boot spinners stay as spinners.
+
+### Empty states
+
+Empty invitations and filter-empty results use `EmptyState`: title, optional body, optional icon or illustration, and optional primary/secondary actions. Domain copy helpers stay the source of the words. Portfolio’s empty collection still shows category art and Explore Packs / Browse Market.
+
+### Errors and recovery
+
+Load failures use `ErrorState` with a `RecoveryAction` (usually Try again). Unknown results, checkout notices, and cart line state banners use `InlineStatusCard` with status tones (icon + text, never color alone). Check again and other recoveries share `RecoveryAction`. Offline and reconnecting use `ConnectivityBanner`. Domain copy and checkout/resume behaviour stay unchanged.
+
+### Accessibility
+
+Interactive controls target at least 44×44 points (`layout.minTouchTarget`, with `hitSlop` on 36pt chips and small buttons). The control that owns an icon carries the `accessibilityLabel`; decorative `Icon`s hide from the tree. Money and display text use `maxFontScale` (display 1.3, body 2). Gain, loss, warning, and availability always pair icon or signed text with color — never color alone. Haptics stay optional on Profile. Reveal keeps spoken sealed/drag/Fast Open/card/summary copy and a reduced-motion tap path in `features/reveal/access.ts`.
+
+### Responsive layout
+
+`SafeAreaProvider` wraps the app. `AppHeader` pads the top inset. Sticky CTAs on cart, pack detail, and market detail pad the bottom inset. Stack scroll screens use `useContentBottomPadding` so the last row clears the home indicator. Tab screens rely on the tab bar for bottom inset. Bottom sheets keep keyboard avoidance. Auth scrolls inside `KeyboardAvoidingView`. Avoid fixed top padding such as `paddingTop: 48`.
+
+### List performance
+
+Market, Portfolio, and Packs browse with `FlatList` (windowed). Card components (`PackCard`, `MarketplaceItemCard`, `HoldingCard`, `HomePackTile`, `CollectibleArt`) are memoized; open handlers take an id so the parent callback stays stable. Drop countdown ticks stay inside `DropCountdown` so grids do not re-render every second. Home featured/recent rails stay small horizontal `ScrollView`s to avoid nesting a VirtualizedList inside the home scroll. FlashList and `expo-image` are deferred until real catalog images and denser lists need them.
+
+### Visual consistency
+
+Consumer and reviewer screens read from `theme/` tokens: `layout.screenPadding` (16), `layout.sectionGap` (24), button/card/chip radii, and the cobalt accent. Shared buttons replace per-screen primary styles. Status surfaces use `EmptyState`, `ErrorState`, `InlineStatusCard`, and `ConnectivityBanner`. The old warm-gold chrome is not used on QA or Admin.
+
+### Bottom sheets
+
+Minor choices use `AppBottomSheet`: pack quantity, pack tier filters, market filters/sort, portfolio sort, deposit, listing price, delist confirmation, and activity details. The sheet is a React Native `Modal` with safe-area padding, keyboard avoidance on iOS, a drag handle, scrim dismiss, Close, and `onRequestClose`. Discovery sheets may slide; financial sheets (`motion="financial"`) and reduced-motion fade only so money does not travel.
+
+Deposit presets fill the amount only. The footer confirms. Listing price and delist also confirm in the sheet; the page does not charge or list on a chip tap. While a deposit or listing request is in flight, dismiss stays blocked. Unknown results keep the sheet open with Check again.
 
 ### Drops
 
@@ -276,7 +326,7 @@ Cached inventory is never the checkout authority.
 
 ### Offline
 
-Connectivity states: `ONLINE`, `RECONNECTING`, `OFFLINE`.
+Connectivity states: `ONLINE`, `RECONNECTING`, `OFFLINE`, from a shared NetInfo subscription in `useConnectivity` / `useOnline`. Wallet no longer keeps a private listener. `ConnectivityBanner` shows for OFFLINE (screen-specific stale detail) and RECONNECTING (shared stale-snapshot line). Financial actions stay disabled unless status is `ONLINE`.
 
 Offline UI may show the last snapshot and must say it may be stale.
 

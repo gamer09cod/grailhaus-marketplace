@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import * as Crypto from "expo-crypto";
 import {
-  ActivityIndicator,
   AppState,
   Pressable,
   StyleSheet,
@@ -9,7 +8,6 @@ import {
   TextInput,
   View,
 } from "react-native";
-import NetInfo from "@react-native-community/netinfo";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -26,9 +24,17 @@ import {
 } from "../../api/deposit";
 import { loadCatalogSummary } from "../../api/catalog";
 import { watchTables } from "../../api/live";
-import { supabase } from "../../api/supabase";
+import { AppHeader } from "../../components/AppHeader";
+import { AppBottomSheet } from "../../components/AppBottomSheet";
+import { Chip, ChipGroup } from "../../components/Chip";
+import { ConnectivityBanner } from "../../components/ConnectivityBanner";
+import { InlineStatusCard } from "../../components/InlineStatusCard";
+import { RecoveryAction } from "../../components/RecoveryAction";
+import { PrimaryButton } from "../../components/buttons";
+import { colors, layout, maxFontScale, radius, spacing, typography, useContentBottomPadding } from "../../theme";
 import { dollarsToCents, formatCents } from "../../utils/money";
 import { useAuth } from "../auth/AuthProvider";
+import { useOnline } from "../shelf/useOnline";
 import { loadBalanceCents } from "./wallet";
 
 const presets = [
@@ -42,8 +48,10 @@ export function WalletScreen() {
   const { session } = useAuth();
   const userId = session?.user.id ?? "";
   const queryClient = useQueryClient();
-  const [online, setOnline] = useState(true);
+  const online = useOnline();
+  const contentBottom = useContentBottomPadding();
   const [customAmount, setCustomAmount] = useState("");
+  const [depositOpen, setDepositOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [awaitingResult, setAwaitingResult] = useState(false);
@@ -61,9 +69,6 @@ export function WalletScreen() {
   });
 
   useEffect(() => {
-    const network = NetInfo.addEventListener((state) => {
-      setOnline(state.isConnected !== false);
-    });
     const appState = AppState.addEventListener("change", (next) => {
       if (next === "active") {
         void queryClient.invalidateQueries({ queryKey: ["wallet", userId] });
@@ -78,7 +83,6 @@ export function WalletScreen() {
       },
     );
     return () => {
-      network();
       appState.remove();
       stop();
     };
@@ -88,6 +92,7 @@ export function WalletScreen() {
     let cancelled = false;
     void readInflightDeposit().then((inflight) => {
       if (!cancelled && inflight) {
+        setDepositOpen(true);
         setConfirming(true);
         setNotice("Confirming deposit…\n\nThis deposit may have completed.\nWe're checking before retrying.");
         void runDeposit(inflight.amountCents, inflight.idempotencyKey, false);
@@ -117,6 +122,7 @@ export function WalletScreen() {
       await clearInflightDeposit();
       queryClient.setQueryData(["wallet", userId], receipt.balanceCents);
       setAwaitingResult(false);
+      setDepositOpen(false);
       setNotice(`Deposited ${formatCents(receipt.amountCents)}.`);
     } catch (error) {
       if (error instanceof DepositUnknown) {
@@ -158,6 +164,9 @@ export function WalletScreen() {
     startDeposit(cents);
   }
 
+  const depositCents = dollarsToCents(customAmount);
+  const depositBusy = !online || confirming || awaitingResult;
+  const depositLabel = depositCents ? `Deposit · ${formatCents(depositCents)}` : "Deposit";
   const balanceLabel = balance.isLoading
     ? "Loading balance"
     : balance.isError
@@ -168,177 +177,189 @@ export function WalletScreen() {
 
   return (
     <View style={styles.screen}>
-      <View style={styles.header}>
-        <Text style={styles.brand}>GrailHaus</Text>
-        <View style={styles.headerLinks}>
-          <Pressable onPress={() => navigation.navigate("Shelf")}>
-            <Text style={styles.signOut}>Shelf</Text>
-          </Pressable>
-          <Pressable onPress={() => navigation.navigate("Admin")}>
-            <Text style={styles.signOut}>Admin</Text>
-          </Pressable>
-          <Pressable onPress={() => void supabase.auth.signOut()}>
-            <Text style={styles.signOut}>Sign out</Text>
-          </Pressable>
+      <AppHeader back title="Wallet" />
+      <View style={[styles.body, { paddingBottom: contentBottom }]}>
+        <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.label}>Balance</Text>
+        <Text
+          accessibilityLabel={
+            balance.isLoading
+              ? "Loading balance"
+              : balance.isError
+                ? "Balance unavailable"
+                : balance.data !== undefined
+                  ? `Balance ${formatCents(balance.data)}`
+                  : "Balance"
+          }
+          maxFontSizeMultiplier={maxFontScale.display}
+          style={styles.balance}
+        >
+          {balanceLabel}
+        </Text>
+        {balance.isError ? (
+          <InlineStatusCard
+            body="Pull the app forward to try again."
+            icon="alert-circle-outline"
+            title="We couldn't read your balance."
+            tone="warning"
+          />
+        ) : null}
+        <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.catalog}>
+          {catalog.isLoading
+            ? "Loading catalog…"
+            : catalog.isError
+              ? "Catalog unavailable. Check the connection and reopen the wallet."
+              : `${catalog.data?.itemCount ?? 0} collectibles across ${catalog.data?.packCount ?? 0} packs`}
+        </Text>
+        <Pressable
+          accessibilityLabel="App version"
+          delayLongPress={3000}
+          onLongPress={() => navigation.navigate("Qa")}
+        >
+          <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.version}>Version 1.0.0</Text>
+        </Pressable>
+        <ConnectivityBanner offlineDetail="Balances and the catalog may be out of date. Deposits stay disabled until the connection returns." />
+        <View style={styles.depositLaunch}>
+          <PrimaryButton
+            disabled={!online || confirming}
+            fullWidth
+            label="Deposit"
+            motion="financial"
+            onPress={() => {
+              setDepositOpen(true);
+            }}
+          />
         </View>
+        {notice ? (
+          <InlineStatusCard
+            action={
+              awaitingResult
+                ? {
+                    label: "Check again",
+                    motion: "financial",
+                    variant: "secondary",
+                    fullWidth: true,
+                    onPress: checkDepositAgain,
+                  }
+                : undefined
+            }
+            icon={awaitingResult ? "help-circle-outline" : notice.startsWith("Deposited") ? "checkmark-circle-outline" : "alert-circle-outline"}
+            title={notice}
+            tone={awaitingResult ? "warning" : notice.startsWith("Deposited") ? "success" : "info"}
+          />
+        ) : null}
       </View>
-      <Text style={styles.label}>Wallet</Text>
-      <Text style={styles.balance}>{balanceLabel}</Text>
-      {balance.isError ? (
-        <Text style={styles.notice}>We couldn't read your balance. Pull the app forward to try again.</Text>
-      ) : null}
-      <Text style={styles.catalog}>
-        {catalog.isLoading
-          ? "Loading catalog…"
-          : catalog.isError
-            ? "Catalog unavailable. Check the connection and reopen the wallet."
-            : `${catalog.data?.itemCount ?? 0} collectibles across ${catalog.data?.packCount ?? 0} packs`}
-      </Text>
-      <Pressable delayLongPress={3000} onLongPress={() => navigation.navigate("Qa")}>
-        <Text style={styles.version}>Version 1.0.0</Text>
-      </Pressable>
-      {!online ? (
-        <Text style={styles.notice}>You're offline. Balances and the catalog may be out of date.</Text>
-      ) : null}
-      <Text style={styles.section}>Add mock funds</Text>
-      <View style={styles.row}>
-        {presets.map((preset) => (
-          <Pressable
-            key={preset.label}
-            disabled={!online || confirming || awaitingResult}
-            style={[styles.preset, (!online || confirming || awaitingResult) && styles.disabled]}
-            onPress={() => startDeposit(preset.cents)}
-          >
-            <Text style={styles.presetLabel}>{preset.label}</Text>
-          </Pressable>
-        ))}
-      </View>
-      <View style={styles.customRow}>
+      <AppBottomSheet
+        motion="financial"
+        title="Deposit"
+        visible={depositOpen}
+        footer={
+          awaitingResult ? (
+            <RecoveryAction
+              fullWidth
+              label="Check again"
+              motion="financial"
+              variant="secondary"
+              onPress={checkDepositAgain}
+            />
+          ) : (
+            <PrimaryButton
+              disabled={depositBusy || depositCents === null}
+              fullWidth
+              label={confirming ? "Confirming deposit…" : depositLabel}
+              loading={confirming}
+              loadingLabel="Confirming deposit…"
+              motion="financial"
+              onPress={startCustomDeposit}
+            />
+          )
+        }
+        onClose={() => {
+          if (!confirming) {
+            setDepositOpen(false);
+          }
+        }}
+      >
+        <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.sheetLead}>
+          Mock deposits credit this trial wallet. Amounts are integer cents.
+        </Text>
+        <ChipGroup accessibilityLabel="Deposit presets">
+          {presets.map((preset) => (
+            <Chip
+              key={preset.label}
+              disabled={depositBusy}
+              label={preset.label}
+              selected={depositCents === preset.cents}
+              onPress={() => setCustomAmount((preset.cents / 100n).toString())}
+            />
+          ))}
+        </ChipGroup>
         <TextInput
+          accessibilityLabel="Deposit amount"
           keyboardType="decimal-pad"
           placeholder="Custom amount"
-          placeholderTextColor="#8d8478"
-          style={styles.input}
+          placeholderTextColor={colors.textTertiary}
+          style={styles.sheetInput}
           value={customAmount}
           onChangeText={setCustomAmount}
         />
-        <Pressable
-          disabled={!online || confirming || awaitingResult}
-          style={[styles.primary, (!online || confirming || awaitingResult) && styles.disabled]}
-          onPress={startCustomDeposit}
-        >
-          {confirming ? (
-            <ActivityIndicator color="#1a140c" />
-          ) : (
-            <Text style={styles.primaryLabel}>Deposit</Text>
-          )}
-        </Pressable>
-      </View>
-      {notice ? <Text style={styles.notice}>{notice}</Text> : null}
-      {awaitingResult ? (
-        <Pressable style={styles.primary} onPress={checkDepositAgain}>
-          <Text style={styles.primaryLabel}>Check again</Text>
-        </Pressable>
-      ) : null}
+        {notice ? (
+          <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.sheetNotice}>{notice}</Text>
+        ) : null}
+      </AppBottomSheet>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   screen: {
+    backgroundColor: colors.backgroundPrimary,
     flex: 1,
-    backgroundColor: "#12110f",
-    padding: 24,
   },
-  header: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginTop: 24,
-  },
-  headerLinks: {
-    flexDirection: "row",
-    gap: 16,
-  },
-  brand: {
-    color: "#f4efe6",
-    fontSize: 22,
-    fontWeight: "600",
-  },
-  signOut: {
-    color: "#e4c07a",
+  body: {
+    paddingHorizontal: layout.screenPadding,
+    paddingTop: spacing.sm,
   },
   label: {
-    color: "#c9bfb2",
-    marginTop: 36,
+    ...typography.label,
+    color: colors.textTertiary,
+    marginTop: spacing.sm,
   },
   balance: {
-    color: "#f4efe6",
-    fontSize: 42,
-    fontWeight: "600",
-    marginTop: 4,
+    ...typography.moneyLarge,
+    color: colors.textPrimary,
+    marginTop: spacing.xs,
   },
   catalog: {
-    color: "#c9bfb2",
-    marginTop: 12,
+    ...typography.bodySmall,
+    color: colors.textSecondary,
+    marginTop: spacing.md,
   },
   version: {
-    color: "#8d8478",
-    marginTop: 8,
+    ...typography.caption,
+    color: colors.textTertiary,
+    marginTop: spacing.sm,
+    minHeight: layout.minTouchTarget,
+    paddingVertical: spacing.md,
   },
-  section: {
-    color: "#f4efe6",
-    marginTop: 36,
-    marginBottom: 12,
-    fontSize: 18,
+  depositLaunch: {
+    marginTop: spacing.lg,
   },
-  row: {
-    flexDirection: "row",
-    gap: 8,
+  sheetLead: {
+    ...typography.bodySmall,
+    color: colors.textSecondary,
   },
-  preset: {
-    flex: 1,
+  sheetInput: {
+    ...typography.money,
+    backgroundColor: colors.surfaceSecondary,
+    borderColor: colors.borderSubtle,
+    borderRadius: radius.button,
     borderWidth: 1,
-    borderColor: "#e4c07a",
-    borderRadius: 12,
-    minHeight: 48,
-    alignItems: "center",
-    justifyContent: "center",
+    color: colors.textPrimary,
+    minHeight: layout.minTouchTarget,
+    paddingHorizontal: spacing.base,
   },
-  presetLabel: {
-    color: "#e4c07a",
-    fontWeight: "600",
-  },
-  customRow: {
-    flexDirection: "row",
-    gap: 8,
-    marginTop: 12,
-  },
-  input: {
-    flex: 1,
-    backgroundColor: "#1d1b18",
-    color: "#f4efe6",
-    borderRadius: 12,
-    paddingHorizontal: 16,
-  },
-  primary: {
-    backgroundColor: "#e4c07a",
-    borderRadius: 12,
-    minWidth: 108,
-    minHeight: 48,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  primaryLabel: {
-    color: "#1a140c",
-    fontWeight: "600",
-  },
-  disabled: {
-    opacity: 0.4,
-  },
-  notice: {
-    color: "#e4c07a",
-    marginTop: 16,
-    lineHeight: 22,
+  sheetNotice: {
+    ...typography.bodySmall,
+    color: colors.textSecondary,
   },
 });

@@ -5,22 +5,36 @@ import * as Crypto from "expo-crypto";
 import type { RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import {
-  ActivityIndicator,
-  AppState,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { CartRejected, CartUnknown, submitCart } from "../../api/cart";
 import { watchTables } from "../../api/live";
+import { AppHeader } from "../../components/AppHeader";
+import { AppBottomSheet } from "../../components/AppBottomSheet";
+import { Chip, ChipGroup } from "../../components/Chip";
+import { CollectibleArt } from "../../components/CollectibleArt";
+import { ConnectivityBanner } from "../../components/ConnectivityBanner";
+import { ErrorState } from "../../components/ErrorState";
+import { InlineStatusCard } from "../../components/InlineStatusCard";
+import { RecoveryAction } from "../../components/RecoveryAction";
+import { DetailSkeleton } from "../../components/Skeleton";
+import { IconButton, PrimaryButton } from "../../components/buttons";
+import { iconSlot } from "../../components/Icon";
 import type { AppStackParamList } from "../../navigation/types";
+import { colors, layout, maxFontScale, radius, spacing, typography } from "../../theme";
 import { formatCents } from "../../utils/money";
-import { secondsUntil } from "../cart/countdown";
-import { loadDropBoard, type TimedDrop } from "../drops/board";
-import { DropStatusText } from "../drops/DropsScreen";
+import type { TimedDrop } from "../drops/board";
+import { useClockLabel } from "../drops/DropCountdown";
+import { dropClosedCopy, dropCtaLabel } from "../drops/dropCopy";
+import { browsePacks, browseSimilar } from "../drops/dropNav";
+import { DropStatus } from "../drops/DropStatus";
+import { useDropBoard } from "../drops/useDropBoard";
 import {
   categoryLabel,
   clampQuantity,
@@ -29,29 +43,29 @@ import {
   loadShelfPacks,
   rarityLabel,
   stockLabel,
-  tierPresence,
+  type Rarity,
 } from "./packs";
 import { useOnline } from "./useOnline";
+
+const quantityPresets = [1, 3, 5, 10] as const;
 
 export function PackDetailScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<AppStackParamList>>();
   const route = useRoute<RouteProp<AppStackParamList, "PackDetail">>();
   const queryClient = useQueryClient();
+  const insets = useSafeAreaInsets();
   const online = useOnline();
   const [requested, setRequested] = useState(1);
+  const [quantityOpen, setQuantityOpen] = useState(false);
   const [reserving, setReserving] = useState(false);
   const [reserveNotice, setReserveNotice] = useState<string | null>(null);
   const [reserveUnknown, setReserveUnknown] = useState(false);
   const reserveKey = useRef<string | null>(null);
-  const boundaryKey = useRef<string | null>(null);
   const packs = useQuery({
     queryKey: ["shelf-packs"],
     queryFn: loadShelfPacks,
   });
-  const drops = useQuery({
-    queryKey: ["drop-board"],
-    queryFn: loadDropBoard,
-  });
+  const drops = useDropBoard();
   const odds = useQuery({
     queryKey: ["pack-odds", route.params.packId],
     queryFn: () => loadPackOdds(route.params.packId),
@@ -74,55 +88,23 @@ export function PackDetailScreen() {
       : undefined;
   const selectionCap = pack ? reserveCap(pack.reservable, pack.maxPerUser) : 0n;
   const quantity = pack ? clampQuantity(requested, selectionCap) : 0;
-  const presence = pack ? tierPresence(pack.priceCents) : "quiet";
   const dropOpen = !pack?.drop || pack.drop.status === "LIVE";
   const loading = (packs.isLoading || drops.isLoading) && !pack;
   const failed = !pack && packs.isError && drops.isError;
-
-  const refreshDrops = useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: ["drop-board"] });
-  }, [queryClient]);
+  const total = pack ? pack.priceCents * BigInt(quantity) : 0n;
+  const cap = selectionCap > 100n ? 100 : Number(selectionCap);
 
   useFocusEffect(
     useCallback(() => {
-      refreshDrops();
-    }, [refreshDrops]),
+      void queryClient.invalidateQueries({ queryKey: ["shelf-packs"] });
+    }, [queryClient]),
   );
 
   useEffect(() => {
-    const appState = AppState.addEventListener("change", (next) => {
-      if (next === "active") {
-        refreshDrops();
-      }
-    });
-    const stop = watchTables("drop-detail", [{ table: "pack_skus" }, { table: "drops" }], () => {
-      refreshDrops();
+    return watchTables("pack-detail-stock", [{ table: "pack_skus" }], () => {
       void queryClient.invalidateQueries({ queryKey: ["shelf-packs"] });
     });
-    return () => {
-      appState.remove();
-      stop();
-    };
-  }, [queryClient, refreshDrops, route.params.packId]);
-
-  useEffect(() => {
-    if (!drop || !drops.data) {
-      return;
-    }
-    const timer = setInterval(() => {
-      const nextNow = Date.now();
-      const target = drop.status === "UPCOMING" ? drop.startsAt : drop.status === "LIVE" ? drop.endsAt : null;
-      if (
-        target
-        && secondsUntil(target, drops.data.serverNow, drops.data.fetchedAtMs, nextNow) === 0
-        && boundaryKey.current !== drops.data.serverNow
-      ) {
-        boundaryKey.current = drops.data.serverNow;
-        refreshDrops();
-      }
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [drop, drops.data, refreshDrops]);
+  }, [queryClient, route.params.packId]);
 
   function startReserve(remember: boolean) {
     if (!pack || !online || !dropOpen || quantity < 1) {
@@ -160,126 +142,223 @@ export function PackDetailScreen() {
     });
   }
 
+  const ctaLabel = quantity < 1
+    ? "Sold out"
+    : `Add ${quantity} to Cart · ${formatCents(total)}`;
+  const canReserve = online && dropOpen && quantity >= 1 && !reserveUnknown;
+
   return (
-    <ScrollView contentContainerStyle={styles.content} style={styles.screen}>
-      <Pressable onPress={() => navigation.goBack()}>
-        <Text style={styles.link}>Back</Text>
-      </Pressable>
-      {!online ? (
-        <Text style={styles.notice}>You're offline. Price and availability may be out of date.</Text>
-      ) : null}
+    <View style={styles.screen}>
+      <AppHeader back cart />
+      <ScrollView contentContainerStyle={styles.content} style={styles.scroll}>
+        <ConnectivityBanner offlineDetail="Price and availability may be out of date. Reservations stay disabled until the connection returns." />
 
-      {loading ? (
-        <View style={styles.status}>
-          <ActivityIndicator color="#e4c07a" />
-          <Text style={styles.notice}>Loading this pack…</Text>
-        </View>
-      ) : null}
+        {loading ? <DetailSkeleton accessibilityLabel="Loading this pack" /> : null}
 
-      {failed ? (
-        <View style={styles.status}>
-          <Text style={styles.notice}>This pack didn't load. Check the connection and try again.</Text>
-          <Pressable style={styles.retry} onPress={() => {
-            void packs.refetch();
-            void drops.refetch();
-          }}>
-            <Text style={styles.retryLabel}>Try again</Text>
-          </Pressable>
-        </View>
-      ) : null}
+        {failed ? (
+          <ErrorState
+            body="Check the connection and try again."
+            title="This pack didn't load."
+            onRetry={() => {
+              void packs.refetch();
+              void drops.refetch();
+            }}
+          />
+        ) : null}
 
-      {packs.data && drops.data && !pack ? (
-        <Text style={styles.notice}>This pack is not on the shelf.</Text>
-      ) : null}
+        {packs.data && drops.data && !pack ? (
+          <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.notice}>
+            This pack is not on the shelf.
+          </Text>
+        ) : null}
+
+        {pack ? (
+          <View style={styles.body}>
+            <CollectibleArt category={pack.category} height={220} title={pack.name} />
+            <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.kicker}>
+              {categoryLabel(pack.category)}
+            </Text>
+            <Text maxFontSizeMultiplier={maxFontScale.display} style={styles.name}>{pack.name}</Text>
+            <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.tier}>{pack.tier}</Text>
+            <Text maxFontSizeMultiplier={maxFontScale.display} style={styles.price}>{formatCents(pack.priceCents)}</Text>
+            {pack.drop && drops.data ? (
+              <DropStatus board={drops.data} drop={pack.drop} />
+            ) : (
+              <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.availability}>
+                {stockLabel(pack.reservable)}
+              </Text>
+            )}
+            {pack.maxPerUser ? (
+              <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.notice}>
+                Maximum {pack.maxPerUser} packs per user
+              </Text>
+            ) : null}
+
+            <View style={styles.section}>
+              <Text accessibilityRole="header" maxFontSizeMultiplier={maxFontScale.body} style={styles.sectionTitle}>
+                What&apos;s inside
+              </Text>
+              {odds.isLoading ? (
+                <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.notice}>Loading odds…</Text>
+              ) : null}
+              {odds.isError ? (
+                <ErrorState title="Odds didn't load. Try again." onRetry={() => void odds.refetch()} />
+              ) : null}
+              {odds.data && odds.data.length === 0 ? (
+                <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.notice}>
+                  Odds are not published for this pack.
+                </Text>
+              ) : null}
+              {odds.data?.map((row) => (
+                <View key={row.rarity} style={styles.oddsRow}>
+                  <Text maxFontSizeMultiplier={maxFontScale.body} style={[styles.oddsRarity, { color: rarityColor(row.rarity) }]}>
+                    {rarityLabel(row.rarity)}
+                  </Text>
+                  <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.oddsValue}>
+                    {formatBasisPoints(row.basisPoints)}
+                  </Text>
+                </View>
+              ))}
+            </View>
+
+            {pack.drop && pack.drop.status !== "LIVE" ? (
+              <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.notice}>
+                {dropClosedCopy(pack.drop.status)}
+              </Text>
+            ) : quantity === 0 ? (
+              <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.notice}>
+                Sold out. None of these packs are left to reserve.
+              </Text>
+            ) : (
+              <Pressable
+                accessibilityLabel={`Quantity ${quantity}. Change`}
+                accessibilityRole="button"
+                onPress={() => setQuantityOpen(true)}
+                style={({ pressed }) => [styles.qtyRow, pressed ? styles.qtyPressed : null]}
+              >
+                <View style={styles.qtyCopy}>
+                  <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.sectionTitle}>Quantity</Text>
+                  <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.summaryLine}>
+                    {quantity} × {formatCents(pack.priceCents)}
+                  </Text>
+                </View>
+                <Text maxFontSizeMultiplier={maxFontScale.display} style={styles.quantity}>{quantity}</Text>
+              </Pressable>
+            )}
+          </View>
+        ) : null}
+      </ScrollView>
 
       {pack ? (
-        <View>
-          <Text style={styles.category}>{categoryLabel(pack.category)}</Text>
-          <Text style={styles.tier}>{pack.tier}</Text>
-          <Text style={[styles.name, presence === "grail" ? styles.nameGrail : null]}>{pack.name}</Text>
-          <Text style={[styles.price, presence === "grail" ? styles.priceGrail : null, presence === "quiet" ? styles.priceQuiet : null]}>
-            {formatCents(pack.priceCents)}
-          </Text>
-          {pack.drop && drops.data ? (
-            <DropStatusText board={drops.data} drop={pack.drop} />
+        <View style={[styles.ctaBar, { paddingBottom: Math.max(insets.bottom, spacing.sm) }]}>
+          {reserveNotice ? (
+            <InlineStatusCard
+              icon={reserveUnknown ? "help-circle-outline" : "alert-circle-outline"}
+              title={reserveNotice}
+              tone={reserveUnknown ? "warning" : "info"}
+            />
+          ) : null}
+          {pack.drop && pack.drop.status !== "LIVE" && drops.data ? (
+            <ClosedDropCta
+              drop={pack.drop}
+              fetchedAtMs={drops.data.fetchedAtMs}
+              serverNow={drops.data.serverNow}
+              onBrowsePacks={() => browsePacks(navigation)}
+              onBrowseSimilar={() => browseSimilar(navigation, pack.category)}
+            />
+          ) : reserveUnknown ? (
+            <RecoveryAction
+              fullWidth
+              label="Check again"
+              motion="financial"
+              variant="secondary"
+              onPress={() => startReserve(false)}
+            />
           ) : (
-            <Text style={styles.availability}>{stockLabel(pack.reservable)}</Text>
-          )}
-          {pack.maxPerUser ? (
-            <Text style={styles.notice}>Maximum {pack.maxPerUser} packs per user</Text>
-          ) : null}
-
-          <Text style={styles.section}>Rarity odds</Text>
-          {odds.isLoading ? <Text style={styles.notice}>Loading odds…</Text> : null}
-          {odds.isError ? (
-            <View>
-              <Text style={styles.notice}>Odds didn't load. Try again.</Text>
-              <Pressable style={styles.retry} onPress={() => void odds.refetch()}>
-                <Text style={styles.retryLabel}>Try again</Text>
-              </Pressable>
-            </View>
-          ) : null}
-          {odds.data && odds.data.length === 0 ? (
-            <Text style={styles.notice}>Odds are not published for this pack.</Text>
-          ) : null}
-          {odds.data?.map((row) => (
-            <View key={row.rarity} style={styles.oddsRow}>
-              <Text style={styles.oddsRarity}>{rarityLabel(row.rarity)}</Text>
-              <Text style={styles.oddsValue}>{formatBasisPoints(row.basisPoints)}</Text>
-            </View>
-          ))}
-
-          {pack.drop && !dropOpen ? null : (
-          <View>
-          <Text style={styles.section}>Quantity</Text>
-          {quantity === 0 ? (
-            <Text style={styles.notice}>Sold out. None of these packs are left to reserve.</Text>
-          ) : (
-            <View>
-              <View style={styles.stepper}>
-                <Pressable
-                  disabled={quantity <= 1}
-                  style={[styles.step, quantity <= 1 && styles.stepDisabled]}
-                  onPress={() => setRequested(quantity - 1)}
-                >
-                  <Text style={styles.stepLabel}>−</Text>
-                </Pressable>
-                <Text style={styles.quantity}>{quantity}</Text>
-                <Pressable
-                  disabled={selectionCap <= BigInt(quantity)}
-                  style={[styles.step, selectionCap <= BigInt(quantity) && styles.stepDisabled]}
-                  onPress={() => setRequested(quantity + 1)}
-                >
-                  <Text style={styles.stepLabel}>+</Text>
-                </Pressable>
-              </View>
-              <Text style={styles.total}>
-                {quantity} × {formatCents(pack.priceCents)} = {formatCents(pack.priceCents * BigInt(quantity))}
-              </Text>
-              <Pressable
-                disabled={!online || !dropOpen || reserving || reserveUnknown}
-                style={[styles.retry, (!online || !dropOpen || reserving || reserveUnknown) && styles.stepDisabled]}
-                onPress={() => startReserve(true)}
-              >
-                <Text style={styles.retryLabel}>{reserving ? "Reserving…" : "Reserve"}</Text>
-              </Pressable>
-              {reserveNotice ? <Text style={styles.notice}>{reserveNotice}</Text> : null}
-              {reserveUnknown ? (
-                <Pressable style={styles.retry} onPress={() => startReserve(false)}>
-                  <Text style={styles.retryLabel}>Check again</Text>
-                </Pressable>
-              ) : null}
-              {!online ? (
-                <Text style={styles.notice}>You're offline. Reservations stay disabled until the connection returns.</Text>
-              ) : null}
-            </View>
-          )}
-          </View>
+            <PrimaryButton
+              disabled={!canReserve}
+              fullWidth
+              label={ctaLabel}
+              loading={reserving}
+              loadingLabel="Confirming reservation…"
+              motion="financial"
+              onPress={() => startReserve(true)}
+            />
           )}
         </View>
       ) : null}
-    </ScrollView>
+
+      {pack && quantity > 0 ? (
+        <AppBottomSheet
+          title="Quantity"
+          visible={quantityOpen}
+          onClose={() => setQuantityOpen(false)}
+          footer={
+            <PrimaryButton
+              fullWidth
+              label={`Done · ${formatCents(total)}`}
+              onPress={() => setQuantityOpen(false)}
+            />
+          }
+        >
+          <ChipGroup accessibilityLabel="Quantity presets">
+            {quantityPresets.map((preset) => (
+              <Chip
+                key={preset}
+                disabled={preset > cap}
+                label={String(preset)}
+                selected={quantity === preset}
+                onPress={() => setRequested(preset)}
+              />
+            ))}
+          </ChipGroup>
+          <View style={styles.stepper}>
+            <IconButton
+              accessibilityLabel="Decrease quantity"
+              disabled={quantity <= 1}
+              icon={iconSlot("remove", 20)}
+              variant="surface"
+              onPress={() => setRequested(quantity - 1)}
+            />
+            <Text maxFontSizeMultiplier={maxFontScale.display} style={styles.quantity}>{quantity}</Text>
+            <IconButton
+              accessibilityLabel="Increase quantity"
+              disabled={quantity >= cap}
+              icon={iconSlot("add", 20)}
+              variant="surface"
+              onPress={() => setRequested(quantity + 1)}
+            />
+          </View>
+          <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.summaryLine}>
+            {quantity} × {formatCents(pack.priceCents)}
+          </Text>
+        </AppBottomSheet>
+      ) : null}
+    </View>
   );
+}
+
+function ClosedDropCta({
+  drop,
+  serverNow,
+  fetchedAtMs,
+  onBrowsePacks,
+  onBrowseSimilar,
+}: {
+  drop: TimedDrop;
+  serverNow: string;
+  fetchedAtMs: number;
+  onBrowsePacks: () => void;
+  onBrowseSimilar: () => void;
+}) {
+  const startsIn = useClockLabel(drop.startsAt, serverNow, fetchedAtMs, drop.status === "UPCOMING");
+  if (drop.status === "SOLD_OUT") {
+    return <PrimaryButton fullWidth label={dropCtaLabel("SOLD_OUT")} onPress={onBrowseSimilar} />;
+  }
+  if (drop.status === "ENDED") {
+    return <PrimaryButton fullWidth label={dropCtaLabel("ENDED")} onPress={onBrowsePacks} />;
+  }
+  return <PrimaryButton disabled fullWidth label={`Starts in ${startsIn}`} onPress={() => undefined} />;
 }
 
 function reserveCap(reservable: bigint, maxPerUser: number | null): bigint {
@@ -290,125 +369,130 @@ function reserveCap(reservable: bigint, maxPerUser: number | null): bigint {
   return reservable < limit ? reservable : limit;
 }
 
+function rarityColor(rarity: Rarity): string {
+  return colors.rarity[rarity].solid;
+}
+
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: "#12110f",
+    backgroundColor: colors.backgroundPrimary,
+  },
+  scroll: {
+    flex: 1,
   },
   content: {
-    padding: 24,
-    paddingTop: 48,
-    paddingBottom: 48,
+    gap: spacing.md,
+    paddingBottom: layout.stickyCtaClearance,
+    paddingHorizontal: layout.screenPadding,
+    paddingTop: spacing.sm,
   },
-  link: {
-    color: "#e4c07a",
-    marginBottom: 20,
+  body: {
+    gap: spacing.sm,
   },
-  status: {
-    marginTop: 12,
+  block: {
+    gap: spacing.sm,
   },
-  category: {
-    color: "#a3988c",
-    fontSize: 12,
-    letterSpacing: 0.6,
-    textTransform: "uppercase",
-  },
-  tier: {
-    color: "#c9bfb2",
-    marginTop: 8,
+  kicker: {
+    ...typography.label,
+    color: colors.textTertiary,
+    marginTop: spacing.sm,
   },
   name: {
-    color: "#f4efe6",
-    fontSize: 28,
-    fontWeight: "600",
-    marginTop: 8,
+    ...typography.display,
+    color: colors.textPrimary,
   },
-  nameGrail: {
-    fontSize: 36,
+  tier: {
+    ...typography.body,
+    color: colors.textSecondary,
   },
   price: {
-    color: "#f4efe6",
-    fontSize: 32,
-    fontWeight: "600",
-    marginTop: 16,
-  },
-  priceQuiet: {
-    fontSize: 22,
-  },
-  priceGrail: {
-    color: "#e4c07a",
-    fontSize: 44,
+    ...typography.moneyLarge,
+    color: colors.textPrimary,
+    marginTop: spacing.xs,
   },
   availability: {
-    color: "#c9bfb2",
-    marginTop: 8,
+    ...typography.bodySmall,
+    color: colors.textSecondary,
   },
   section: {
-    color: "#f4efe6",
-    fontSize: 18,
-    fontWeight: "600",
-    marginTop: 32,
-    marginBottom: 12,
+    gap: spacing.sm,
+    marginTop: layout.sectionGap,
+  },
+  sectionTitle: {
+    ...typography.heading,
+    color: colors.textPrimary,
   },
   notice: {
-    color: "#c9bfb2",
-    lineHeight: 20,
-    marginTop: 8,
-  },
-  retry: {
-    alignSelf: "flex-start",
-    backgroundColor: "#e4c07a",
-    borderRadius: 999,
-    marginTop: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-  },
-  retryLabel: {
-    color: "#1a140c",
-    fontWeight: "600",
+    ...typography.bodySmall,
+    color: colors.textSecondary,
   },
   oddsRow: {
+    borderBottomColor: colors.borderSubtle,
+    borderBottomWidth: 1,
     flexDirection: "row",
     justifyContent: "space-between",
-    paddingVertical: 8,
-    borderBottomColor: "#2e2a26",
-    borderBottomWidth: 1,
+    minHeight: 44,
+    paddingVertical: spacing.md,
   },
   oddsRarity: {
-    color: "#f4efe6",
+    ...typography.bodyMedium,
   },
   oddsValue: {
-    color: "#e4c07a",
+    ...typography.moneySmall,
+    color: colors.textPrimary,
   },
   stepper: {
     alignItems: "center",
     flexDirection: "row",
-    gap: 16,
+    gap: spacing.lg,
+    marginTop: spacing.sm,
   },
-  step: {
+  qtyRow: {
     alignItems: "center",
-    backgroundColor: "#2a241c",
-    borderRadius: 12,
-    height: 44,
-    justifyContent: "center",
-    width: 44,
+    backgroundColor: colors.surfacePrimary,
+    borderColor: colors.borderSubtle,
+    borderRadius: radius.card,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: spacing.md,
+    marginTop: layout.sectionGap,
+    minHeight: layout.minTouchTarget,
+    paddingHorizontal: spacing.base,
+    paddingVertical: spacing.md,
   },
-  stepDisabled: {
-    opacity: 0.35,
+  qtyPressed: {
+    backgroundColor: colors.surfacePressed,
   },
-  stepLabel: {
-    color: "#f4efe6",
-    fontSize: 22,
+  qtyCopy: {
+    flex: 1,
+    gap: spacing.xxs,
   },
   quantity: {
-    color: "#f4efe6",
-    fontSize: 22,
-    fontWeight: "600",
-    minWidth: 32,
+    ...typography.title,
+    color: colors.textPrimary,
+    minWidth: 40,
     textAlign: "center",
   },
+  summaryLine: {
+    ...typography.body,
+    color: colors.textSecondary,
+    marginTop: spacing.md,
+  },
   total: {
-    color: "#f4efe6",
-    marginTop: 16,
+    ...typography.money,
+    color: colors.textPrimary,
+  },
+  ctaBar: {
+    backgroundColor: colors.backgroundSecondary,
+    borderTopColor: colors.borderSubtle,
+    borderTopWidth: 1,
+    gap: spacing.sm,
+    paddingHorizontal: layout.screenPadding,
+    paddingTop: spacing.md,
+  },
+  ctaNotice: {
+    ...typography.bodySmall,
+    color: colors.textSecondary,
   },
 });

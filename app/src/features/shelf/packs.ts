@@ -4,7 +4,7 @@ import { centsFromWire } from "../../utils/money";
 
 export const shelfCategories = ["TRADING_CARD", "SNEAKER", "WATCH"] as const;
 
-const rarityOrder = ["COMMON", "UNCOMMON", "RARE", "EPIC", "LEGENDARY"] as const;
+export const rarityOrder = ["COMMON", "UNCOMMON", "RARE", "EPIC", "LEGENDARY"] as const;
 
 export type Rarity = (typeof rarityOrder)[number];
 
@@ -52,6 +52,10 @@ export function rarityLabel(rarity: Rarity): string {
   }
 }
 
+export function isRarity(value: string): value is Rarity {
+  return rarityOrder.some((rarity) => rarity === value);
+}
+
 export function formatBasisPoints(points: number): string {
   const whole = Math.trunc(points / 100);
   const fraction = Math.abs(points % 100);
@@ -63,6 +67,7 @@ export function formatBasisPoints(points: number): string {
 
 export type TierPresence = "quiet" | "standard" | "elevated" | "grail";
 
+/** Visual weight on pack detail. Prefer `packTierClass` for Entry / Premium / Grail filters. */
 export function tierPresence(priceCents: bigint): TierPresence {
   if (priceCents >= 200_000n) {
     return "grail";
@@ -76,11 +81,46 @@ export function tierPresence(priceCents: bigint): TierPresence {
   return "quiet";
 }
 
+export type PackTierClass = "entry" | "premium" | "grail";
+
+/** Price bands for Packs filters. Entry < $500, Premium $500–$1,999.99, Grail ≥ $2,000. */
+export function packTierClass(priceCents: bigint): PackTierClass {
+  if (priceCents >= 200_000n) {
+    return "grail";
+  }
+  if (priceCents >= 50_000n) {
+    return "premium";
+  }
+  return "entry";
+}
+
+export function packTierClassLabel(klass: PackTierClass): string {
+  switch (klass) {
+    case "entry":
+      return "Entry";
+    case "premium":
+      return "Premium";
+    case "grail":
+      return "Grail";
+  }
+}
+
 export function stockLabel(reservable: bigint): string {
   if (reservable <= 0n) {
     return "Sold out";
   }
   return `${reservable.toString()} available`;
+}
+
+/** Home and pack tiles omit stock when the number is not scarce. */
+export function scarcityLabel(reservable: bigint): string | null {
+  if (reservable <= 0n) {
+    return "Sold out";
+  }
+  if (reservable <= 50n) {
+    return `${reservable.toString()} left`;
+  }
+  return null;
 }
 
 export function featuredPacks(packs: readonly ShelfPack[]): ShelfPack[] {

@@ -1,18 +1,23 @@
 import { useState } from "react";
 import {
-  ActivityIndicator,
-  Pressable,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { PrimaryButton, TertiaryButton } from "../../components/buttons";
 import { supabase } from "../../api/supabase";
+import { colors, layout, maxFontScale, radius, spacing, typography } from "../../theme";
 
 type Mode = "sign-in" | "create-account";
 
 export function AuthScreen() {
+  const insets = useSafeAreaInsets();
   const [mode, setMode] = useState<Mode>("sign-in");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -45,49 +50,76 @@ export function AuthScreen() {
   }
 
   return (
-    <View style={styles.screen}>
-      <Text style={styles.brand}>GrailHaus</Text>
-      <Text style={styles.lead}>
-        {mode === "sign-in" ? "Sign in to your wallet." : "Create an account. It starts at $0.00."}
-      </Text>
-      <TextInput
-        autoCapitalize="none"
-        autoComplete="email"
-        keyboardType="email-address"
-        placeholder="Email"
-        placeholderTextColor="#8d8478"
-        style={styles.input}
-        value={email}
-        onChangeText={setEmail}
-      />
-      <TextInput
-        autoComplete="password"
-        placeholder="Password"
-        placeholderTextColor="#8d8478"
-        secureTextEntry
-        style={styles.input}
-        value={password}
-        onChangeText={setPassword}
-      />
-      {message ? <Text style={styles.message}>{message}</Text> : null}
-      <Pressable disabled={submitting} style={styles.primary} onPress={() => void submit()}>
-        {submitting ? (
-          <ActivityIndicator color="#1a140c" />
-        ) : (
-          <Text style={styles.primaryLabel}>{mode === "sign-in" ? "Sign in" : "Create account"}</Text>
-        )}
-      </Pressable>
-      <Pressable
-        onPress={() => {
-          setMode(mode === "sign-in" ? "create-account" : "sign-in");
-          setMessage(null);
-        }}
+    <KeyboardAvoidingView
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      style={styles.flex}
+    >
+      <ScrollView
+        contentContainerStyle={[
+          styles.content,
+          {
+            paddingTop: insets.top + spacing.xl,
+            paddingBottom: insets.bottom + spacing.xl,
+          },
+        ]}
+        keyboardShouldPersistTaps="handled"
+        style={styles.flex}
       >
-        <Text style={styles.switch}>
-          {mode === "sign-in" ? "Need an account? Create one" : "Already have an account? Sign in"}
-        </Text>
-      </Pressable>
-    </View>
+        <View style={styles.form}>
+          <Text accessibilityRole="header" maxFontSizeMultiplier={maxFontScale.display} style={styles.brand}>
+            GrailHaus
+          </Text>
+          <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.lead}>
+            {mode === "sign-in" ? "Sign in to your wallet." : "Create an account. It starts at $0.00."}
+          </Text>
+          <TextInput
+            accessibilityLabel="Email"
+            autoCapitalize="none"
+            autoComplete="email"
+            keyboardType="email-address"
+            placeholder="Email"
+            placeholderTextColor={colors.textTertiary}
+            style={styles.input}
+            value={email}
+            onChangeText={setEmail}
+          />
+          <TextInput
+            accessibilityLabel="Password"
+            autoComplete="password"
+            placeholder="Password"
+            placeholderTextColor={colors.textTertiary}
+            secureTextEntry
+            style={styles.input}
+            value={password}
+            onChangeText={setPassword}
+          />
+          {message ? (
+            <Text
+              accessibilityLiveRegion="polite"
+              maxFontSizeMultiplier={maxFontScale.body}
+              style={styles.message}
+            >
+              {message}
+            </Text>
+          ) : null}
+          <PrimaryButton
+            fullWidth
+            label={mode === "sign-in" ? "Sign in" : "Create account"}
+            loading={submitting}
+            loadingLabel={mode === "sign-in" ? "Signing in…" : "Creating account…"}
+            onPress={() => void submit()}
+          />
+          <TertiaryButton
+            fullWidth
+            label={mode === "sign-in" ? "Need an account? Create one" : "Already have an account? Sign in"}
+            onPress={() => {
+              setMode(mode === "sign-in" ? "create-account" : "sign-in");
+              setMessage(null);
+            }}
+          />
+        </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -107,51 +139,40 @@ function authNotice(message: string, mode: Mode): string {
 }
 
 const styles = StyleSheet.create({
-  screen: {
+  flex: {
+    backgroundColor: colors.backgroundPrimary,
     flex: 1,
-    backgroundColor: "#12110f",
-    padding: 24,
+  },
+  content: {
+    flexGrow: 1,
     justifyContent: "center",
+    paddingHorizontal: layout.screenPadding,
+  },
+  form: {
+    gap: spacing.md,
   },
   brand: {
-    color: "#f4efe6",
-    fontSize: 36,
-    fontWeight: "600",
+    ...typography.displayXL,
+    color: colors.textPrimary,
   },
   lead: {
-    color: "#c9bfb2",
-    fontSize: 16,
-    marginTop: 8,
-    marginBottom: 24,
+    ...typography.body,
+    color: colors.textSecondary,
+    marginBottom: spacing.sm,
   },
   input: {
-    backgroundColor: "#1d1b18",
-    color: "#f4efe6",
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    marginBottom: 12,
-    fontSize: 16,
+    ...typography.body,
+    backgroundColor: colors.surfacePrimary,
+    borderColor: colors.borderSubtle,
+    borderRadius: radius.button,
+    borderWidth: 1,
+    color: colors.textPrimary,
+    minHeight: layout.minTouchTarget,
+    paddingHorizontal: spacing.base,
+    paddingVertical: spacing.md,
   },
   message: {
-    color: "#e4c07a",
-    marginBottom: 12,
-  },
-  primary: {
-    backgroundColor: "#e4c07a",
-    borderRadius: 12,
-    minHeight: 48,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  primaryLabel: {
-    color: "#1a140c",
-    fontSize: 16,
-    fontWeight: "600",
-  },
-  switch: {
-    color: "#e4c07a",
-    textAlign: "center",
-    marginTop: 20,
+    ...typography.bodySmall,
+    color: colors.status.warning.solid,
   },
 });

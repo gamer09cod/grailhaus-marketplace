@@ -1,92 +1,181 @@
-import { Pressable, StyleSheet, Text } from "react-native";
+import { memo } from "react";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 
+import { CollectibleArt } from "../../components/CollectibleArt";
+import type { PackCategory } from "../../navigation/types";
+import { colors, layout, maxFontScale, radius, spacing, typography, usePressMotion } from "../../theme";
 import { formatCents } from "../../utils/money";
-import { categoryLabel, stockLabel, tierPresence, type ShelfPack, type TierPresence } from "./packs";
 
-type PackCardProps = {
-  pack: ShelfPack;
-  onPress: () => void;
+export type PackCardBadge = "LIVE" | "DROP" | "SOLD_OUT";
+
+export type PackCardProps = {
+  packId: string;
+  category: PackCategory;
+  name: string;
+  tier: string;
+  priceCents: bigint;
+  availability: string;
+  badges?: PackCardBadge[];
+  imageUrl?: string | null;
+  onOpen: (packId: string) => void;
 };
 
-export function PackCard({ pack, onPress }: PackCardProps) {
-  const presence = tierPresence(pack.priceCents);
-
+export const PackCard = memo(function PackCard({
+  packId,
+  category,
+  name,
+  tier,
+  priceCents,
+  availability,
+  badges = [],
+  imageUrl,
+  onOpen,
+}: PackCardProps) {
+  const pressMotion = usePressMotion("discovery");
+  const price = formatCents(priceCents);
+  const badgeNames = badges.map(badgeLabel).join(", ");
   return (
-    <Pressable onPress={onPress} style={[styles.card, presenceStyle[presence]]}>
-      <Text style={styles.category}>{categoryLabel(pack.category)}</Text>
-      <Text style={[styles.name, nameStyle[presence]]}>{pack.name}</Text>
-      <Text style={styles.tier}>{pack.tier}</Text>
-      <Text style={[styles.price, priceStyle[presence]]}>{formatCents(pack.priceCents)}</Text>
-      <Text style={styles.stock}>{stockLabel(pack.reservable)}</Text>
+    <Pressable
+      accessibilityLabel={`${name}. ${tier}. ${price}. ${availability}${badgeNames ? `. ${badgeNames}` : ""}`}
+      accessibilityRole="button"
+      onPress={() => onOpen(packId)}
+      style={({ pressed }) => [styles.card, pressed ? styles.pressed : null, pressMotion(pressed)]}
+    >
+      <CollectibleArt
+        category={category}
+        height={168}
+        imageUrl={imageUrl}
+        overlay={
+          badges.length > 0 ? (
+            <View pointerEvents="none" style={styles.badges}>
+              {badges.map((badge) => (
+                <View key={badge} style={[styles.badge, badgeStyle[badge]]}>
+                  {badge === "LIVE" ? <View style={styles.liveDot} /> : null}
+                  <Text maxFontSizeMultiplier={maxFontScale.body} style={[styles.badgeLabel, badgeLabelStyle[badge]]}>
+                    {badgeLabel(badge)}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          ) : null
+        }
+        style={styles.art}
+        title={name}
+      />
+      <View style={styles.info}>
+        <Text maxFontSizeMultiplier={maxFontScale.body} numberOfLines={2} style={styles.name}>{name}</Text>
+        <Text maxFontSizeMultiplier={maxFontScale.body} numberOfLines={1} style={styles.tier}>{tier}</Text>
+        <Text maxFontSizeMultiplier={maxFontScale.display} style={styles.price}>{price}</Text>
+        <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.availability}>{availability}</Text>
+      </View>
     </Pressable>
+  );
+}, packCardPropsEqual);
+
+function packCardPropsEqual(prev: PackCardProps, next: PackCardProps): boolean {
+  const prevBadges = prev.badges ?? [];
+  const nextBadges = next.badges ?? [];
+  return (
+    prev.packId === next.packId
+    && prev.category === next.category
+    && prev.name === next.name
+    && prev.tier === next.tier
+    && prev.priceCents === next.priceCents
+    && prev.availability === next.availability
+    && prev.imageUrl === next.imageUrl
+    && prev.onOpen === next.onOpen
+    && prevBadges.length === nextBadges.length
+    && prevBadges.every((badge, index) => badge === nextBadges[index])
   );
 }
 
-const presenceStyle: Record<TierPresence, object> = {
-  quiet: {
-    backgroundColor: "#1a1814",
-    borderColor: "#2e2a26",
-    padding: 14,
+function badgeLabel(badge: PackCardBadge): string {
+  if (badge === "SOLD_OUT") {
+    return "Sold out";
+  }
+  return badge;
+}
+
+const badgeStyle: Record<PackCardBadge, object> = {
+  LIVE: {
+    backgroundColor: colors.accent.muted,
+    borderColor: colors.accent.border,
   },
-  standard: {
-    backgroundColor: "#1c1916",
-    borderColor: "#4a4036",
-    padding: 16,
+  DROP: {
+    backgroundColor: colors.surfaceElevated,
+    borderColor: colors.borderStrong,
   },
-  elevated: {
-    backgroundColor: "#221c16",
-    borderColor: "#8a7044",
-    padding: 18,
-  },
-  grail: {
-    backgroundColor: "#2a2218",
-    borderColor: "#e4c07a",
-    borderWidth: 1.5,
-    padding: 22,
+  SOLD_OUT: {
+    backgroundColor: colors.status.error.muted,
+    borderColor: colors.status.error.border,
   },
 };
 
-const nameStyle: Record<TierPresence, object> = {
-  quiet: { fontSize: 16 },
-  standard: { fontSize: 18 },
-  elevated: { fontSize: 22 },
-  grail: { fontSize: 28 },
-};
-
-const priceStyle: Record<TierPresence, object> = {
-  quiet: { fontSize: 16, color: "#f4efe6" },
-  standard: { fontSize: 20, color: "#f4efe6" },
-  elevated: { fontSize: 28, color: "#f4efe6" },
-  grail: { fontSize: 36, color: "#e4c07a" },
+const badgeLabelStyle: Record<PackCardBadge, object> = {
+  LIVE: { color: colors.textPrimary },
+  DROP: { color: colors.textPrimary },
+  SOLD_OUT: { color: colors.status.error.solid },
 };
 
 const styles = StyleSheet.create({
   card: {
+    backgroundColor: colors.surfacePrimary,
+    borderColor: colors.borderSubtle,
+    borderRadius: radius.card,
     borderWidth: 1,
-    borderRadius: 16,
-    marginBottom: 12,
+    overflow: "hidden",
   },
-  category: {
-    color: "#a3988c",
-    fontSize: 12,
-    letterSpacing: 0.6,
-    textTransform: "uppercase",
+  pressed: {
+    backgroundColor: colors.surfacePressed,
+  },
+  art: {
+    borderRadius: 0,
+  },
+  badges: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+    left: spacing.md,
+    position: "absolute",
+    top: spacing.md,
+  },
+  badge: {
+    alignItems: "center",
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: spacing.xs,
+    minHeight: 24,
+    paddingHorizontal: spacing.sm,
+  },
+  liveDot: {
+    backgroundColor: colors.status.success.solid,
+    borderRadius: radius.full,
+    height: 6,
+    width: 6,
+  },
+  badgeLabel: {
+    ...typography.label,
+  },
+  info: {
+    gap: spacing.xxs,
+    padding: layout.cardPadding,
   },
   name: {
-    color: "#f4efe6",
-    fontWeight: "600",
-    marginTop: 8,
+    ...typography.heading,
+    color: colors.textPrimary,
   },
   tier: {
-    color: "#c9bfb2",
-    marginTop: 4,
+    ...typography.bodySmall,
+    color: colors.textSecondary,
   },
   price: {
-    fontWeight: "600",
-    marginTop: 12,
+    ...typography.money,
+    color: colors.textPrimary,
+    marginTop: spacing.sm,
   },
-  stock: {
-    color: "#c9bfb2",
-    marginTop: 4,
+  availability: {
+    ...typography.bodySmall,
+    color: colors.textSecondary,
   },
 });

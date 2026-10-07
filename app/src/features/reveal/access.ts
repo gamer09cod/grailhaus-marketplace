@@ -78,5 +78,5 @@ export function summaryAnnouncement(
   estimatedCents: bigint,
   bestName: string,
 ): string {
-  return `${packsOpenedLabel(count)}. Total spent ${spokenCents(spentCents)}. Estimated value ${spokenCents(estimatedCents)}. Best pull ${bestName}.`;
+  return `${packsOpenedLabel(count)}. Total spent ${spokenCents(spentCents)}. Collection value ${spokenCents(estimatedCents)}. Best pull ${bestName}.`;
 }
