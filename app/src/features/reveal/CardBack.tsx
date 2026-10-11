@@ -4,7 +4,7 @@ import { radius, revealCardFrame } from "../../theme";
 
 const cardBackArt = require("../../../assets/catalog/card-back.jpg");
 
-/** Shared GrailHaus card back — no item identity or rarity cues. */
+/** Shared GrailHaus card back — fills the reveal frame edge-to-edge. */
 export const CardBack = memo(function CardBack() {
   return (
     <View accessible={false} style={styles.card}>
@@ -27,6 +27,12 @@ const styles = StyleSheet.create({
     backgroundColor: "#07080C",
   },
   art: {
-    ...StyleSheet.absoluteFill,
+    // Explicit bounds — absoluteFill alone can keep JPEG intrinsic size on Android
+    // and leave letterbox gaps inside the frame.
+    position: "absolute",
+    top: 0,
+    left: 0,
+    width: revealCardFrame.width,
+    height: revealCardFrame.height,
   },
 });

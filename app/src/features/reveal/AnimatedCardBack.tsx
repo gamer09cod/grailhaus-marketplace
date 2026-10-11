@@ -77,7 +77,16 @@ export function AnimatedCardBack({ rarity, suspense, durationMs, active, reduced
 }
 const styles = StyleSheet.create({
   rotator: { width: revealCardFrame.width, height: revealCardFrame.height },
-  face: { position: "absolute", top: 0, left: 0, backfaceVisibility: "hidden" },
+  face: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    width: revealCardFrame.width,
+    height: revealCardFrame.height,
+    backfaceVisibility: "hidden",
+    overflow: "hidden",
+    borderRadius: 24,
+  },
   reverse: { transform: [{ rotateY: "180deg" }] },
   edge: {
     position: "absolute",

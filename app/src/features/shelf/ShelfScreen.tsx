@@ -33,12 +33,15 @@ import { HeroDropCard } from "../drops/HeroDropCard";
 import { otherActiveDrops, pickHeroDrop } from "../drops/select";
 import { useDropBoard } from "../drops/useDropBoard";
 import { useWalletBalance } from "../wallet/useWalletBalance";
+import { HomeCatalogTile } from "./HomeCatalogTile";
 import { HomePackTile } from "./HomePackTile";
 import {
   featuredPacks,
+  loadShelfCatalogItems,
   loadShelfPacks,
   rarityLabel,
   type Rarity,
+  type ShelfCatalogItem,
   type ShelfPack,
 } from "./packs";
 import { timeAgo } from "./timeAgo";
@@ -50,12 +53,14 @@ export function ShelfScreen() {
   const packTileWidth = Math.min(Math.round((windowWidth - layout.screenPadding * 2) * 0.62), 240);
   const packArtHeight = Math.round(packTileWidth);
   const packs = useQuery({ queryKey: ["shelf-packs"], queryFn: loadShelfPacks });
+  const catalogItems = useQuery({ queryKey: ["shelf-catalog-items"], queryFn: loadShelfCatalogItems });
   const drops = useDropBoard();
   const holdings = useQuery({ queryKey: ["holdings"], queryFn: loadHoldings });
   const sealed = useQuery({ queryKey: ["sealed-packs"], queryFn: loadSealedPacks });
 
   const refresh = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: ["shelf-packs"] });
+    void queryClient.invalidateQueries({ queryKey: ["shelf-catalog-items"] });
     void queryClient.invalidateQueries({ queryKey: ["drop-board"] });
     void queryClient.invalidateQueries({ queryKey: ["holdings"] });
     void queryClient.invalidateQueries({ queryKey: ["sealed-packs"] });
@@ -64,6 +69,7 @@ export function ShelfScreen() {
   useFocusEffect(
     useCallback(() => {
       void queryClient.invalidateQueries({ queryKey: ["shelf-packs"] });
+      void queryClient.invalidateQueries({ queryKey: ["shelf-catalog-items"] });
       void queryClient.invalidateQueries({ queryKey: ["holdings"] });
       void queryClient.invalidateQueries({ queryKey: ["sealed-packs"] });
     }, [queryClient]),
@@ -91,18 +97,20 @@ export function ShelfScreen() {
   const hero = board ? pickHeroDrop(board.drops) : null;
   const moreDrops = board ? otherActiveDrops(board.drops, hero?.dropId ?? null) : [];
   const showcase = packs.data ? showcasePacks(packs.data, "TRADING_CARD") : [];
-  const sneakers = packs.data ? showcasePacks(packs.data, "SNEAKER") : [];
-  const watches = packs.data ? showcasePacks(packs.data, "WATCH") : [];
+  const sneakers = (catalogItems.data ?? []).filter((item) => item.category === "SNEAKER");
+  const watches = (catalogItems.data ?? []).filter((item) => item.category === "WATCH");
   const recent = (holdings.data ?? []).slice(0, 8);
   const totals = holdings.data && holdings.data.length > 0 ? portfolioTotals(holdings.data) : null;
   const sealedPacks = sealed.data ?? [];
   const refreshing = (
     packs.isRefetching
+    || catalogItems.isRefetching
     || drops.isRefetching
     || holdings.isRefetching
     || sealed.isRefetching
   )
     && !packs.isLoading
+    && !catalogItems.isLoading
     && !drops.isLoading;
 
   const openPack = useCallback((packId: string) => {
@@ -111,6 +119,10 @@ export function ShelfScreen() {
 
   const openCategoryShelf = useCallback((category: "SNEAKER" | "WATCH") => {
     navigation.navigate("Category", { category });
+  }, [navigation]);
+
+  const openCatalogItem = useCallback((item: ShelfCatalogItem) => {
+    navigation.navigate("Tabs", { screen: "Market", params: { category: item.category } });
   }, [navigation]);
 
   return (
@@ -207,8 +219,8 @@ export function ShelfScreen() {
           </Section>
         ) : null}
 
-        {packs.isLoading ? (
-          <Section title="Sneaker packs">
+        {catalogItems.isLoading ? (
+          <Section title="Sneakers">
             <ScrollView horizontal contentContainerStyle={styles.rail} showsHorizontalScrollIndicator={false}>
               <HomeRailSkeleton artHeight={packArtHeight} width={packTileWidth} />
             </ScrollView>
@@ -216,37 +228,37 @@ export function ShelfScreen() {
         ) : sneakers.length > 0 ? (
           <Section
             actionLabel="See all"
-            title="Sneaker packs"
+            title="Sneakers"
             onAction={() => openCategoryShelf("SNEAKER")}
           >
             <ScrollView horizontal contentContainerStyle={styles.rail} showsHorizontalScrollIndicator={false}>
-              {sneakers.map((pack) => (
-                <HomePackTile
-                  key={pack.id}
+              {sneakers.map((item) => (
+                <HomeCatalogTile
+                  key={item.id}
                   artHeight={packArtHeight}
-                  pack={pack}
+                  item={item}
                   width={packTileWidth}
-                  onOpen={openPack}
+                  onOpen={openCatalogItem}
                 />
               ))}
             </ScrollView>
           </Section>
         ) : null}
 
-        {!packs.isLoading && watches.length > 0 ? (
+        {!catalogItems.isLoading && watches.length > 0 ? (
           <Section
             actionLabel="See all"
-            title="Watch packs"
+            title="Watches"
             onAction={() => openCategoryShelf("WATCH")}
           >
             <ScrollView horizontal contentContainerStyle={styles.rail} showsHorizontalScrollIndicator={false}>
-              {watches.map((pack) => (
-                <HomePackTile
-                  key={pack.id}
+              {watches.map((item) => (
+                <HomeCatalogTile
+                  key={item.id}
                   artHeight={packArtHeight}
-                  pack={pack}
+                  item={item}
                   width={packTileWidth}
-                  onOpen={openPack}
+                  onOpen={openCatalogItem}
                 />
               ))}
             </ScrollView>

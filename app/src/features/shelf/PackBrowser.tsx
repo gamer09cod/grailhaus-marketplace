@@ -17,11 +17,14 @@ import type { TimedDrop } from "../drops/board";
 import { useDropBoard } from "../drops/useDropBoard";
 import { PackCard, type PackCardBadge } from "./PackCard";
 import {
+  loadShelfCatalogItems,
   loadShelfPacks,
   packTierClass,
   packTierClassLabel,
+  rarityLabel,
   stockLabel,
   type PackTierClass,
+  type ShelfCatalogItem,
   type ShelfPack,
 } from "./packs";
 
@@ -42,6 +45,7 @@ const tierChips: { id: PackTierClass; label: string }[] = [
 ];
 
 const emptyPacks: ShelfPack[] = [];
+const emptyItems: ShelfCatalogItem[] = [];
 const emptyDrops: TimedDrop[] = [];
 
 export function PackBrowser({ initialCategory = "ALL" }: { initialCategory?: PacksCategoryFilter }) {
@@ -53,11 +57,13 @@ export function PackBrowser({ initialCategory = "ALL" }: { initialCategory?: Pac
   const [tier, setTier] = useState<PackTierClass | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const packs = useQuery({ queryKey: ["shelf-packs"], queryFn: loadShelfPacks });
+  const catalogItems = useQuery({ queryKey: ["shelf-catalog-items"], queryFn: loadShelfCatalogItems });
   const drops = useDropBoard();
 
   useFocusEffect(
     useCallback(() => {
       void queryClient.invalidateQueries({ queryKey: ["shelf-packs"] });
+      void queryClient.invalidateQueries({ queryKey: ["shelf-catalog-items"] });
     }, [queryClient]),
   );
 
@@ -66,17 +72,25 @@ export function PackBrowser({ initialCategory = "ALL" }: { initialCategory?: Pac
       category,
       tier,
       packs.data ?? emptyPacks,
+      catalogItems.data ?? emptyItems,
       drops.data?.drops ?? emptyDrops,
     ),
-    [category, drops.data?.drops, packs.data, tier],
+    [catalogItems.data, category, drops.data?.drops, packs.data, tier],
   );
-  const loading = packs.isLoading || (category === "DROPS" && drops.isLoading);
+  const loading = packs.isLoading
+    || catalogItems.isLoading
+    || (category === "DROPS" && drops.isLoading);
   const empty = !loading && rows.length === 0;
-  const refreshing = (packs.isRefetching || drops.isRefetching)
+  const refreshing = (packs.isRefetching || catalogItems.isRefetching || drops.isRefetching)
     && !packs.isLoading
+    && !catalogItems.isLoading
     && !drops.isLoading;
 
   const openRow = useCallback((row: BrowseRow) => {
+    if (row.kind === "item") {
+      navigation.navigate("Tabs", { screen: "Market", params: { category: row.category } });
+      return;
+    }
     navigation.navigate("PackDetail", { packId: row.packId });
   }, [navigation]);
 
@@ -156,6 +170,7 @@ export function PackBrowser({ initialCategory = "ALL" }: { initialCategory?: Pac
             tintColor={colors.accent.solid}
             onRefresh={() => {
               void packs.refetch();
+              void catalogItems.refetch();
               void drops.refetch();
             }}
           />
@@ -207,6 +222,7 @@ export function PackBrowser({ initialCategory = "ALL" }: { initialCategory?: Pac
 }
 
 type BrowseRow = {
+  kind: "pack" | "item";
   id: string;
   packId: string;
   category: PackCategory;
@@ -222,16 +238,24 @@ function visibleRows(
   category: PacksCategoryFilter,
   tier: PackTierClass | null,
   packs: ShelfPack[],
+  items: ShelfCatalogItem[],
   drops: TimedDrop[],
 ): BrowseRow[] {
   if (category === "DROPS") {
     return drops.filter(dropIsBrowsable).map(dropRow).filter((row) => matchesTier(row, tier));
   }
 
-  return packs
-    .filter((pack) => category === "ALL" || pack.category === category)
-    .map(shelfPackRow)
-    .filter((row) => matchesTier(row, tier));
+  // Cards stay as pack SKUs; sneakers/watches surface as catalog products with item art.
+  const packRows = packs
+    .filter((pack) => pack.category === "TRADING_CARD")
+    .filter((pack) => category === "ALL" || category === "TRADING_CARD")
+    .map(shelfPackRow);
+
+  const itemRows = items
+    .filter((item) => category === "ALL" || item.category === category)
+    .map(catalogItemRow);
+
+  return [...packRows, ...itemRows].filter((row) => matchesTier(row, tier));
 }
 
 function matchesTier(row: BrowseRow, tier: PackTierClass | null): boolean {
@@ -243,6 +267,7 @@ function matchesTier(row: BrowseRow, tier: PackTierClass | null): boolean {
 
 function shelfPackRow(pack: ShelfPack): BrowseRow {
   return {
+    kind: "pack",
     id: `pack:${pack.id}`,
     packId: pack.id,
     category: pack.category,
@@ -251,6 +276,21 @@ function shelfPackRow(pack: ShelfPack): BrowseRow {
     priceCents: pack.priceCents,
     availability: stockLabel(pack.reservable),
     badges: pack.reservable <= 0n ? ["SOLD_OUT"] : [],
+  };
+}
+
+function catalogItemRow(item: ShelfCatalogItem): BrowseRow {
+  return {
+    kind: "item",
+    id: `item:${item.id}`,
+    packId: item.id,
+    category: item.category,
+    name: item.name,
+    tier: rarityLabel(item.rarity),
+    priceCents: item.valueCents,
+    availability: "Catalog",
+    badges: [],
+    imageUrl: item.imageUrl,
   };
 }
 
@@ -265,6 +305,7 @@ function dropRow(drop: TimedDrop): BrowseRow {
     badges.push("SOLD_OUT");
   }
   return {
+    kind: "pack",
     id: `drop:${drop.dropId}`,
     packId: drop.packSkuId,
     category: drop.category,
@@ -298,10 +339,10 @@ function emptyCopy(category: PacksCategoryFilter, tier: PackTierClass | null): s
     return "Nothing matches those filters.";
   }
   if (category === "SNEAKER") {
-    return "No sneaker packs are on the shelf.";
+    return "No sneakers are in the catalog.";
   }
   if (category === "WATCH") {
-    return "No watch packs are on the shelf.";
+    return "No watches are in the catalog.";
   }
   if (category === "TRADING_CARD") {
     return "No card packs are on the shelf.";

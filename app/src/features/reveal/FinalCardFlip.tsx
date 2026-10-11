@@ -9,6 +9,7 @@ import {
   withTiming,
 } from "react-native-reanimated";
 import { scheduleOnRN } from "react-native-worklets";
+import { revealCardFrame } from "../../theme";
 import { RevealImpact } from "./RevealImpact";
 import { revealFx } from "./revealFx";
 import { finalFlipPose, FLIP_TOTAL_MS } from "./finalFlip";
@@ -108,5 +109,5 @@ export function FinalCardFlip({
 }
 
 const styles = StyleSheet.create({
-  stage: { width: 214, height: 300 },
+  stage: { width: revealCardFrame.width, height: revealCardFrame.height },
 });

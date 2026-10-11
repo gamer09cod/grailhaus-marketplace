@@ -1,6 +1,9 @@
 import { StyleSheet } from "react-native";
 import Animated, { interpolateColor, useAnimatedStyle, type SharedValue } from "react-native-reanimated";
+import { revealCardFrame } from "../../theme";
 import { suspenseStops, type SuspensePalette } from "./suspense";
+
+const PAD = 18;
 
 type Props = { progress: SharedValue<number>; palette: SuspensePalette; reduced: boolean };
 export function RarityGlow({ progress, palette, reduced }: Props) {
@@ -16,4 +19,13 @@ export function RarityGlow({ progress, palette, reduced }: Props) {
   }));
   return <Animated.View pointerEvents="none" accessible={false} style={[styles.glow, light]} />;
 }
-const styles = StyleSheet.create({ glow: { position: "absolute", width: 252, height: 338, left: -19, top: -19, borderRadius: 32 } });
+const styles = StyleSheet.create({
+  glow: {
+    position: "absolute",
+    width: revealCardFrame.width + PAD * 2,
+    height: revealCardFrame.height + PAD * 2,
+    left: -PAD,
+    top: -PAD,
+    borderRadius: 32,
+  },
+});
