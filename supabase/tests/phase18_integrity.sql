@@ -103,20 +103,18 @@ begin
       join rarity_value
         on rarity_value.pack_sku_id = sku.id
        and rarity_value.rarity = odds.rarity
+      where sku.category = 'TRADING_CARD'
+        and sku.fixed_catalog_item_id is null
       group by sku.name, sku.price_cents
     ),
     want(name, price_cents, ev_cents) as (
       values
         ('Starter Pack', 1000::bigint, 489::bigint),
+        ('Scout Pack', 2500::bigint, 489::bigint),
         ('Collector Pack', 10000::bigint, 5228::bigint),
+        ('Elite Pack', 25000::bigint, 5228::bigint),
         ('Legendary Pack', 50000::bigint, 36775::bigint),
-        ('Midnight Drop', 2500::bigint, 489::bigint),
-        ('Street Pack', 8000::bigint, 6136::bigint),
-        ('Rare Pack', 25000::bigint, 22775::bigint),
-        ('Vault Pack', 80000::bigint, 73738::bigint),
-        ('Entry Vault', 50000::bigint, 18540::bigint),
-        ('Luxury Box', 200000::bigint, 181700::bigint),
-        ('Grail Box', 800000::bigint, 739875::bigint)
+        ('Midnight Drop', 2500::bigint, 489::bigint)
     )
     select 1
     from want

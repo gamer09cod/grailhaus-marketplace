@@ -4,7 +4,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { CollectibleArt } from "../../components/CollectibleArt";
 import { colors, maxFontScale, radius, spacing, typography, usePressMotion } from "../../theme";
 import { formatCents } from "../../utils/money";
-import { packTierClass, scarcityLabel, type ShelfPack } from "./packs";
+import { packTierClass, rarityLabel, scarcityLabel, type ShelfPack } from "./packs";
 
 type HomePackTileProps = {
   pack: ShelfPack;
@@ -22,9 +22,10 @@ export const HomePackTile = memo(function HomePackTile({
   const pressMotion = usePressMotion("discovery");
   const stock = scarcityLabel(pack.reservable);
   const klass = packTierClass(pack.priceCents);
+  const meta = pack.fixedProduct && pack.rarity ? rarityLabel(pack.rarity) : pack.tier;
   return (
     <Pressable
-      accessibilityLabel={`${pack.name}. ${pack.tier}. ${formatCents(pack.priceCents)}${stock ? `. ${stock}` : ""}`}
+      accessibilityLabel={`${pack.name}. ${meta}. ${formatCents(pack.priceCents)}${stock ? `. ${stock}` : ""}`}
       accessibilityRole="button"
       onPress={() => onOpen(pack.id)}
       style={({ pressed }) => [
@@ -35,7 +36,13 @@ export const HomePackTile = memo(function HomePackTile({
         pressMotion(pressed),
       ]}
     >
-      <CollectibleArt category={pack.category} fit="contain" height={artHeight} title={pack.name} />
+      <CollectibleArt
+        category={pack.category}
+        fit="contain"
+        height={artHeight}
+        imageUrl={pack.imageUrl}
+        title={pack.name}
+      />
       <View style={styles.info}>
         <Text maxFontSizeMultiplier={maxFontScale.display} style={styles.price}>
           {formatCents(pack.priceCents)}
@@ -44,7 +51,7 @@ export const HomePackTile = memo(function HomePackTile({
           {pack.name}
         </Text>
         <Text maxFontSizeMultiplier={maxFontScale.body} numberOfLines={1} style={styles.tier}>
-          {pack.tier}
+          {meta}
         </Text>
         {stock ? (
           <Text maxFontSizeMultiplier={maxFontScale.body} numberOfLines={1} style={styles.stock}>{stock}</Text>
@@ -62,6 +69,9 @@ export const HomePackTile = memo(function HomePackTile({
   && prev.pack.priceCents === next.pack.priceCents
   && prev.pack.reservable === next.pack.reservable
   && prev.pack.category === next.pack.category
+  && prev.pack.fixedProduct === next.pack.fixedProduct
+  && prev.pack.rarity === next.pack.rarity
+  && prev.pack.imageUrl === next.pack.imageUrl
 ));
 
 const styles = StyleSheet.create({

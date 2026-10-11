@@ -16,7 +16,8 @@ begin
     select count(*) into tier_count
     from public.pack_skus
     where category = category_name
-      and is_drop = false;
+      and is_drop = false
+      and active = true;
 
     if category_name = 'TRADING_CARD' and (item_count < 20 or item_count > 30) then
       raise exception 'catalog count for % is %', category_name, item_count;
@@ -27,7 +28,7 @@ begin
     end if;
 
     if tier_count <> 5 then
-      raise exception 'tier count for % is %', category_name, tier_count;
+      raise exception 'shelf count for % is %', category_name, tier_count;
     end if;
   end loop;
 

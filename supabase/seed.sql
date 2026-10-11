@@ -67,19 +67,29 @@ insert into public.pack_skus (
   ('TRADING_CARD', 'Starter Pack', 'Starter', 1000, 500, 500, 0, false, true),
   ('TRADING_CARD', 'Collector Pack', 'Collector', 10000, 500, 500, 0, false, true),
   ('TRADING_CARD', 'Legendary Pack', 'Legendary', 50000, 500, 500, 0, false, true),
-  ('SNEAKER', 'Street Pack', 'Street', 8000, 500, 500, 0, false, true),
-  ('SNEAKER', 'Rare Pack', 'Rare', 25000, 500, 500, 0, false, true),
-  ('SNEAKER', 'Vault Pack', 'Vault', 80000, 500, 500, 0, false, true),
-  ('WATCH', 'Entry Vault', 'Entry Vault', 50000, 500, 500, 0, false, true),
-  ('WATCH', 'Luxury Box', 'Luxury', 200000, 500, 500, 0, false, true),
-  ('WATCH', 'Grail Box', 'Grail', 800000, 500, 500, 0, false, true),
   ('TRADING_CARD', 'Scout Pack', 'Scout', 2500, 500, 500, 0, false, true),
   ('TRADING_CARD', 'Elite Pack', 'Elite', 25000, 500, 500, 0, false, true),
-  ('SNEAKER', 'Daily Pack', 'Daily', 12000, 500, 500, 0, false, true),
-  ('SNEAKER', 'Archive Pack', 'Archive', 50000, 500, 500, 0, false, true),
-  ('WATCH', 'Heritage Box', 'Heritage', 100000, 500, 500, 0, false, true),
-  ('WATCH', 'Prestige Box', 'Prestige', 400000, 500, 500, 0, false, true),
   ('TRADING_CARD', 'Midnight Drop', 'Midnight', 2500, 40, 40, 0, true, true);
+
+-- One fixed retail SKU per sneaker/watch catalog item (guaranteed fulfillment).
+-- tier matches name so (category, tier) stays unique across products.
+insert into public.pack_skus (
+  category, name, tier, price_cents, stock_total, stock_on_hand, stock_reserved,
+  is_drop, active, fixed_catalog_item_id
+)
+select
+  item.category,
+  item.name,
+  item.name,
+  item.base_value_cents,
+  500,
+  500,
+  0,
+  false,
+  true,
+  item.id
+from public.catalog_items item
+where item.category in ('SNEAKER', 'WATCH');
 
 -- Odds and pools commit together. The coverage trigger is deferred, so a
 -- rarity cannot be published without an item of that rarity in the pool.
@@ -91,18 +101,7 @@ declare
     array['TRADING_CARD', 'Collector', 'Stone Cub', 'Spark Circuit', 'Hollow Howl', 'Brass Scout', 'Ivory Fang', 'Storm Ledger', 'Tide Kraken', 'Nyxara', 'Auric Crown'],
     array['TRADING_CARD', 'Elite', 'Stone Cub', 'Spark Circuit', 'Hollow Howl', 'Brass Scout', 'Ivory Fang', 'Storm Ledger', 'Tide Kraken', 'Nyxara', 'Auric Crown'],
     array['TRADING_CARD', 'Legendary', 'Royal Runner', 'Pale Orbit', 'Thorn Viper', 'Mirror Scale', 'Sapphire Clash', 'Gold Relic', 'Eclipse Sovereign', 'Void Empress', 'Aurelith Drake'],
-    array['TRADING_CARD', 'Midnight', 'Emberkin', 'Tide Minnow', 'Glow Sprite', 'Gust Finch', 'Volt Mite', 'Shade Cub', 'Rookwing', 'Bloom Wyrmling', 'Ember Drake'],
-    -- Pad to 11 slots so Postgres accepts a rectangular text[][] (cards use 9 pool items).
-    array['SNEAKER', 'Street', 'Nike Dunk Low Panda', 'Jordan 1 Mid Chicago', 'Jordan 4 Military Black', 'Nike Dunk Low Travis Scott', 'Jordan 1 High Lost and Found', '', '', '', ''],
-    array['SNEAKER', 'Daily', 'Nike Dunk Low Panda', 'Jordan 1 Mid Chicago', 'Jordan 4 Military Black', 'Nike Dunk Low Travis Scott', 'Jordan 1 High Lost and Found', '', '', '', ''],
-    array['SNEAKER', 'Rare', 'Nike Dunk Low Panda', 'Jordan 1 Mid Chicago', 'Jordan 4 Military Black', 'Nike Dunk Low Travis Scott', 'Jordan 1 High Lost and Found', '', '', '', ''],
-    array['SNEAKER', 'Archive', 'Nike Dunk Low Panda', 'Jordan 1 Mid Chicago', 'Jordan 4 Military Black', 'Nike Dunk Low Travis Scott', 'Jordan 1 High Lost and Found', '', '', '', ''],
-    array['SNEAKER', 'Vault', 'Nike Dunk Low Panda', 'Jordan 1 Mid Chicago', 'Jordan 4 Military Black', 'Nike Dunk Low Travis Scott', 'Jordan 1 High Lost and Found', '', '', '', ''],
-    array['WATCH', 'Entry Vault', 'Casio G-Shock GA2100', 'Seiko Alpinist SPB121', 'Hamilton Khaki Field', 'Tissot PRX Powermatic 80', 'Longines HydroConquest', '', '', '', ''],
-    array['WATCH', 'Heritage', 'Casio G-Shock GA2100', 'Seiko Alpinist SPB121', 'Hamilton Khaki Field', 'Tissot PRX Powermatic 80', 'Longines HydroConquest', '', '', '', ''],
-    array['WATCH', 'Luxury', 'Casio G-Shock GA2100', 'Seiko Alpinist SPB121', 'Hamilton Khaki Field', 'Tissot PRX Powermatic 80', 'Longines HydroConquest', '', '', '', ''],
-    array['WATCH', 'Prestige', 'Casio G-Shock GA2100', 'Seiko Alpinist SPB121', 'Hamilton Khaki Field', 'Tissot PRX Powermatic 80', 'Longines HydroConquest', '', '', '', ''],
-    array['WATCH', 'Grail', 'Casio G-Shock GA2100', 'Seiko Alpinist SPB121', 'Hamilton Khaki Field', 'Tissot PRX Powermatic 80', 'Longines HydroConquest', '', '', '', '']
+    array['TRADING_CARD', 'Midnight', 'Emberkin', 'Tide Minnow', 'Glow Sprite', 'Gust Finch', 'Volt Mite', 'Shade Cub', 'Rookwing', 'Bloom Wyrmling', 'Ember Drake']
   ];
   tier_row text[];
   sku_id uuid;
@@ -114,6 +113,7 @@ declare
   rarities text[] := array['COMMON', 'UNCOMMON', 'RARE', 'EPIC', 'LEGENDARY'];
   rarity_index integer;
   problem record;
+  product record;
 begin
   foreach tier_row slice 1 in array tier_names loop
     select id into sku_id
@@ -125,9 +125,9 @@ begin
       raise exception 'missing pack sku % %', tier_row[1], tier_row[2];
     end if;
 
-    if tier_row[2] in ('Starter', 'Street', 'Entry Vault', 'Midnight', 'Scout', 'Daily', 'Heritage') then
+    if tier_row[2] in ('Starter', 'Midnight', 'Scout') then
       chosen := low_odds;
-    elsif tier_row[2] in ('Collector', 'Rare', 'Luxury', 'Elite', 'Archive', 'Prestige') then
+    elsif tier_row[2] in ('Collector', 'Elite') then
       chosen := mid_odds;
     else
       chosen := high_odds;
@@ -155,6 +155,20 @@ begin
     end loop;
   end loop;
 
+  for product in
+    select sku.id as sku_id, item.id as item_id, item.rarity
+    from public.pack_skus sku
+    join public.catalog_items item on item.id = sku.fixed_catalog_item_id
+  loop
+    insert into public.pack_odds (pack_sku_id, rarity, probability_basis_points)
+    values (product.sku_id, product.rarity, 10000);
+
+    insert into public.pack_sku_items (pack_sku_id, catalog_item_id)
+    values (product.sku_id, product.item_id);
+  end loop;
+
+  -- Mystery packs must publish all five rarities with EV under price.
+  -- Fixed retail products are excluded (EV equals the shelf price).
   for problem in
     with rarity_value as (
       select
@@ -176,6 +190,7 @@ begin
       join rarity_value
         on rarity_value.pack_sku_id = sku.id
        and rarity_value.rarity = odds.rarity
+      where sku.fixed_catalog_item_id is null
       group by sku.name, sku.price_cents
     )
     select name, price_cents, ev_cents, priced_rarities
@@ -206,7 +221,8 @@ begin
     select count(*) into tier_count
     from public.pack_skus
     where category = category_name
-      and is_drop = false;
+      and is_drop = false
+      and active = true;
 
     if category_name = 'TRADING_CARD' then
       if item_count < 20 or item_count > 30 then
@@ -217,8 +233,9 @@ begin
       raise exception 'seed catalog count for % is %', category_name, item_count;
     end if;
 
+    -- Cards: five evergreen packs. Sneakers/watches: one fixed SKU per catalog item.
     if tier_count <> 5 then
-      raise exception 'seed tier count for % is %', category_name, tier_count;
+      raise exception 'seed shelf count for % is %', category_name, tier_count;
     end if;
   end loop;
 

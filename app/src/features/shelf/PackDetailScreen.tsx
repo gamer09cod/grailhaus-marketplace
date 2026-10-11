@@ -72,11 +72,12 @@ export function PackDetailScreen() {
     queryFn: loadShelfPacks,
   });
   const drops = useDropBoard();
+  const shelfPack = packs.data?.find((candidate) => candidate.id === route.params.packId);
   const odds = useQuery({
     queryKey: ["pack-odds", route.params.packId],
     queryFn: () => loadPackOdds(route.params.packId),
+    enabled: !shelfPack?.fixedProduct,
   });
-  const shelfPack = packs.data?.find((candidate) => candidate.id === route.params.packId);
   const drop = drops.data?.drops.find((candidate) => candidate.packSkuId === route.params.packId);
   const pack = shelfPack
     ? { ...shelfPack, maxPerUser: null as number | null, drop: null as TimedDrop | null }
@@ -88,10 +89,14 @@ export function PackDetailScreen() {
           tier: drop.tier,
           priceCents: drop.priceCents,
           reservable: drop.reservable,
+          fixedProduct: false,
+          rarity: null,
+          imageUrl: null as string | null,
           maxPerUser: drop.maxPerUser,
           drop,
         }
       : undefined;
+  const isProduct = Boolean(pack?.fixedProduct);
   const selectionCap = pack ? reserveCap(pack.reservable, pack.maxPerUser) : 0n;
   const quantity = pack ? clampQuantity(requested, selectionCap) : 0;
   const dropOpen = !pack?.drop || pack.drop.status === "LIVE";
@@ -157,6 +162,9 @@ export function PackDetailScreen() {
     });
   }
 
+  const unitWord = isProduct
+    ? (quantity === 1 ? "item" : "items")
+    : (quantity === 1 ? "pack" : "packs");
   const ctaLabel = quantity < 1
     ? "Sold out"
     : pack?.drop && pack.drop.status === "LIVE"
@@ -184,12 +192,14 @@ export function PackDetailScreen() {
       >
         <ConnectivityBanner offlineDetail="Price and availability may be out of date. Reservations stay disabled until the connection returns." />
 
-        {loading ? <DetailSkeleton accessibilityLabel="Loading this pack" /> : null}
+        {loading ? (
+          <DetailSkeleton accessibilityLabel={isProduct ? "Loading this item" : "Loading this pack"} />
+        ) : null}
 
         {failed ? (
           <ErrorState
             body="Check the connection and try again."
-            title="This pack didn't load."
+            title={isProduct ? "This item didn't load." : "This pack didn't load."}
             onRetry={() => {
               void packs.refetch();
               void drops.refetch();
@@ -199,7 +209,7 @@ export function PackDetailScreen() {
 
         {packs.data && drops.data && !pack ? (
           <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.notice}>
-            This pack is not on the shelf.
+            This is not on the shelf.
           </Text>
         ) : null}
 
@@ -217,6 +227,7 @@ export function PackDetailScreen() {
                 category={pack.category}
                 fit="contain"
                 height={heroHeight}
+                imageUrl={pack.imageUrl}
                 style={styles.heroArt}
                 title={pack.name}
               />
@@ -231,7 +242,9 @@ export function PackDetailScreen() {
 
             <View style={styles.identity}>
               <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.kicker}>
-                {categoryLabel(pack.category)} · {pack.tier}
+                {categoryLabel(pack.category)}
+                {" · "}
+                {isProduct && pack.rarity ? rarityLabel(pack.rarity) : pack.tier}
               </Text>
               <Text
                 accessibilityRole="header"
@@ -244,7 +257,7 @@ export function PackDetailScreen() {
                 {formatCents(pack.priceCents)}
               </Text>
               <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.unitHint}>
-                Per pack
+                {isProduct ? "Per item" : "Per pack"}
               </Text>
             </View>
 
@@ -264,7 +277,7 @@ export function PackDetailScreen() {
               ) : null}
               {quantity >= 1 && canCover === true ? (
                 <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.contextOk}>
-                  Balance covers {formatCents(total)} for {quantity} {quantity === 1 ? "pack" : "packs"}.
+                  Balance covers {formatCents(total)} for {quantity} {unitWord}.
                 </Text>
               ) : null}
             </View>
@@ -291,37 +304,48 @@ export function PackDetailScreen() {
               ) : null}
             </View>
 
-            <View style={styles.section}>
-              <View style={styles.sectionHead}>
-                <Text accessibilityRole="header" maxFontSizeMultiplier={maxFontScale.body} style={styles.sectionTitle}>
-                  What&apos;s inside
+            {!isProduct ? (
+              <View style={styles.section}>
+                <View style={styles.sectionHead}>
+                  <Text accessibilityRole="header" maxFontSizeMultiplier={maxFontScale.body} style={styles.sectionTitle}>
+                    What&apos;s inside
+                  </Text>
+                  {oddsTotalPoints > 0 ? (
+                    <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.sectionMeta}>
+                      {formatBasisPoints(oddsTotalPoints)} published
+                    </Text>
+                  ) : null}
+                </View>
+                <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.sectionLead}>
+                  Published pull rates for this pack. Exact contents are assigned when you open it.
                 </Text>
-                {oddsTotalPoints > 0 ? (
-                  <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.sectionMeta}>
-                    {formatBasisPoints(oddsTotalPoints)} published
-                  </Text>
-                ) : null}
+                <View style={styles.oddsCard}>
+                  {odds.isLoading ? (
+                    <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.notice}>Loading odds…</Text>
+                  ) : null}
+                  {odds.isError ? (
+                    <ErrorState title="Odds didn't load. Try again." onRetry={() => void odds.refetch()} />
+                  ) : null}
+                  {odds.data && odds.data.length === 0 ? (
+                    <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.notice}>
+                      Odds are not published for this pack.
+                    </Text>
+                  ) : null}
+                  {oddsRows.map((row) => (
+                    <OddsRow key={row.rarity} row={row} />
+                  ))}
+                </View>
               </View>
-              <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.sectionLead}>
-                Published pull rates for this pack. Exact contents are assigned when you open it.
-              </Text>
-              <View style={styles.oddsCard}>
-                {odds.isLoading ? (
-                  <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.notice}>Loading odds…</Text>
-                ) : null}
-                {odds.isError ? (
-                  <ErrorState title="Odds didn't load. Try again." onRetry={() => void odds.refetch()} />
-                ) : null}
-                {odds.data && odds.data.length === 0 ? (
-                  <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.notice}>
-                    Odds are not published for this pack.
-                  </Text>
-                ) : null}
-                {oddsRows.map((row) => (
-                  <OddsRow key={row.rarity} row={row} />
-                ))}
+            ) : (
+              <View style={styles.section}>
+                <Text accessibilityRole="header" maxFontSizeMultiplier={maxFontScale.body} style={styles.sectionTitle}>
+                  What you get
+                </Text>
+                <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.sectionLead}>
+                  You receive this exact item. It goes straight to your collection after payment.
+                </Text>
               </View>
-            </View>
+            )}
 
             {pack.drop && pack.drop.status !== "LIVE" ? (
               <InlineStatusCard
@@ -332,7 +356,11 @@ export function PackDetailScreen() {
             ) : quantity === 0 ? (
               <InlineStatusCard
                 icon="close-circle-outline"
-                title="Sold out. None of these packs are left to reserve."
+                title={
+                  isProduct
+                    ? "Sold out. None of these items are left to reserve."
+                    : "Sold out. None of these packs are left to reserve."
+                }
                 tone="warning"
               />
             ) : (
@@ -384,8 +412,17 @@ export function PackDetailScreen() {
                 Before you buy
               </Text>
               <TrustLine icon="lock-closed-outline" text="Checkout holds stock for a few minutes, then charges your wallet." />
-              <TrustLine icon="shuffle-outline" text="Pack contents are assigned on open. Odds above are the published rates." />
-              <TrustLine icon="albums-outline" text="Opened cards go to your collection. Listing and sales stay there." />
+              {isProduct ? (
+                <>
+                  <TrustLine icon="checkmark-circle-outline" text="You get this exact item — no random pull." />
+                  <TrustLine icon="albums-outline" text="Paid items go to your collection. You can list them on the market." />
+                </>
+              ) : (
+                <>
+                  <TrustLine icon="shuffle-outline" text="Pack contents are assigned on open. Odds above are the published rates." />
+                  <TrustLine icon="albums-outline" text="Opened cards go to your collection. Listing and sales stay there." />
+                </>
+              )}
             </View>
           </View>
         ) : null}
@@ -423,7 +460,11 @@ export function PackDetailScreen() {
             />
           ) : (
             <PrimaryButton
-              accessibilityHint={canReserve ? "Reserves this pack and opens your cart" : undefined}
+              accessibilityHint={
+                canReserve
+                  ? (isProduct ? "Reserves this item and opens your cart" : "Reserves this pack and opens your cart")
+                  : undefined
+              }
               disabled={!canReserve}
               fullWidth
               label={ctaLabel}
@@ -506,7 +547,13 @@ function OddsRow({ row }: { row: PackOdds }) {
   );
 }
 
-function TrustLine({ icon, text }: { icon: "lock-closed-outline" | "shuffle-outline" | "albums-outline"; text: string }) {
+function TrustLine({
+  icon,
+  text,
+}: {
+  icon: "lock-closed-outline" | "shuffle-outline" | "albums-outline" | "checkmark-circle-outline";
+  text: string;
+}) {
   return (
     <View style={styles.trustLine}>
       <Icon color={colors.premium.gold} name={icon} size={18} />

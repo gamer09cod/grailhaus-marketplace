@@ -16,9 +16,13 @@ export type ShelfPack = {
   tier: string;
   priceCents: bigint;
   reservable: bigint;
+  /** True for sneaker/watch retail SKUs that always deliver one catalog item. */
+  fixedProduct: boolean;
+  rarity: Rarity | null;
+  imageUrl: string | null;
 };
 
-/** Fixed sneaker/watch catalog products shown as items, not pack SKUs. */
+/** @deprecated Prefer ShelfPack with fixedProduct for sneaker/watch retail. */
 export type ShelfCatalogItem = {
   id: string;
   category: "SNEAKER" | "WATCH";
@@ -157,7 +161,20 @@ export function clampQuantity(requested: number, reservable: bigint): number {
 export async function loadShelfPacks(): Promise<ShelfPack[]> {
   const { data, error } = await supabase
     .from("pack_skus")
-    .select("id, category, name, tier, price_cents, stock_on_hand, stock_reserved")
+    .select(`
+      id,
+      category,
+      name,
+      tier,
+      price_cents,
+      stock_on_hand,
+      stock_reserved,
+      fixed_catalog_item_id,
+      catalog_items!fixed_catalog_item_id (
+        rarity,
+        image_url
+      )
+    `)
     .eq("active", true)
     .eq("is_drop", false)
     .in("category", ["TRADING_CARD", "SNEAKER", "WATCH"]);
@@ -173,6 +190,19 @@ export async function loadShelfPacks(): Promise<ShelfPack[]> {
     }
     const onHand = centsFromWire(row.stock_on_hand);
     const reserved = centsFromWire(row.stock_reserved);
+    const fixed = typeof row.fixed_catalog_item_id === "string";
+    const linked = Array.isArray(row.catalog_items) ? row.catalog_items[0] : row.catalog_items;
+    const rarity = linked && isRarity(linked.rarity)
+      ? linked.rarity
+      : isRarity(row.tier)
+        ? row.tier
+        : null;
+    const imageUrl = linked?.image_url && linked.image_url.length > 0 ? linked.image_url : null;
+    if (fixed && (row.category === "SNEAKER" || row.category === "WATCH")) {
+      if (!hasListingArtwork(row.category, row.name, imageUrl)) {
+        continue;
+      }
+    }
     packs.push({
       id: row.id,
       category: row.category,
@@ -180,6 +210,9 @@ export async function loadShelfPacks(): Promise<ShelfPack[]> {
       tier: row.tier,
       priceCents: centsFromWire(row.price_cents),
       reservable: onHand - reserved,
+      fixedProduct: fixed,
+      rarity,
+      imageUrl,
     });
   }
 
