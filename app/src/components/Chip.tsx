@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
-import { colors, layout, maxFontScale, radius, spacing, typography, usePressMotion } from "../theme";
+import { colors, fontWeight, layout, maxFontScale, radius, spacing, typography, usePressMotion } from "../theme";
 
 type ChipProps = {
   label: string;
@@ -67,12 +67,12 @@ const styles = StyleSheet.create({
     borderRadius: radius.chip,
     borderWidth: 1,
     justifyContent: "center",
-    minHeight: 36,
+    minHeight: 32,
     minWidth: layout.minTouchTarget,
     paddingHorizontal: spacing.md,
   },
   chipIdle: {
-    backgroundColor: colors.surfacePrimary,
+    backgroundColor: colors.surfaceSecondary,
     borderColor: colors.borderSubtle,
   },
   chipSelected: {
@@ -86,14 +86,14 @@ const styles = StyleSheet.create({
     opacity: 0.4,
   },
   labelIdle: {
-    ...typography.bodySmall,
+    ...typography.caption,
     color: colors.textSecondary,
-    fontWeight: "600",
+    fontWeight: fontWeight.semibold,
   },
   labelSelected: {
-    ...typography.bodySmall,
+    ...typography.caption,
     color: colors.accent.solid,
-    fontWeight: "600",
+    fontWeight: fontWeight.semibold,
   },
   labelDisabled: {
     color: colors.textDisabled,

@@ -2,30 +2,54 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Pressable, RefreshControl, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
+import {
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  View,
+} from "react-native";
 
 import { supabase } from "../../api/supabase";
 import { watchTables } from "../../api/live";
 import { AppHeader } from "../../components/AppHeader";
+import { CollectibleArt } from "../../components/CollectibleArt";
 import { ConnectivityBanner } from "../../components/ConnectivityBanner";
-import { SecondaryButton } from "../../components/buttons";
+import { SecondaryButton, TertiaryButton } from "../../components/buttons";
 import { Icon, iconSlot, type IconName } from "../../components/Icon";
 import type { AppStackParamList } from "../../navigation/types";
-import { colors, layout, maxFontScale, radius, spacing, typography } from "../../theme";
+import {
+  colors,
+  layout,
+  maxFontScale,
+  radius,
+  spacing,
+  typography,
+  useContentBottomPadding,
+  usePressMotion,
+} from "../../theme";
 import { formatCents } from "../../utils/money";
 import { useAuth } from "../auth/AuthProvider";
 import { loadHoldings, type OwnedHolding } from "../collection/inventory";
-import { portfolioTotals } from "../collection/portfolio";
+import {
+  formatSignedCents,
+  portfolioTotals,
+} from "../collection/portfolio";
+import { isRarity, rarityLabel, rarityOrder, type Rarity } from "../shelf/packs";
 import { loadHapticsEnabled, saveHapticsEnabled } from "../reveal/haptics";
 import { useWalletBalance } from "../wallet/useWalletBalance";
 import { loadUsername } from "./identity";
 
 const appVersion = "1.0.0";
 const emptyHoldings: OwnedHolding[] = [];
+const previewLimit = 5;
 
 export function ProfileScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<AppStackParamList>>();
   const queryClient = useQueryClient();
+  const contentBottom = useContentBottomPadding(spacing.xxl);
   const { session } = useAuth();
   const userId = session?.user.id ?? "";
   const email = session?.user.email ?? "";
@@ -99,28 +123,40 @@ export function ProfileScreen() {
 
   const items = holdings.data ?? emptyHoldings;
   const listedCount = useMemo(() => items.filter((item) => item.state === "LISTED").length, [items]);
-  const portfolioValue = useMemo(
-    () => (holdings.data ? portfolioTotals(holdings.data).valueCents : null),
+  const totals = useMemo(
+    () => (holdings.data ? portfolioTotals(holdings.data) : null),
     [holdings.data],
   );
+  const rarityCounts = useMemo(() => countByRarity(items), [items]);
+  const preview = useMemo(() => items.slice(0, previewLimit), [items]);
 
+  const username = publicUsername(profile.data, userId);
+  const displayName =
+    username
+    ?? ((email.includes("@") ? email.split("@")[0]! : email) || "Collector");
   const balanceLabel = balance.data !== undefined
     ? formatCents(balance.data)
     : balance.isError
       ? "Unavailable"
       : "—";
-  const portfolioLabel = portfolioValue !== null
-    ? formatCents(portfolioValue)
+  const portfolioLabel = totals !== null
+    ? formatCents(totals.valueCents)
     : holdings.isError
       ? "Unavailable"
       : "—";
   const listingsLabel = holdings.data !== undefined ? String(listedCount) : "—";
+  const pnlLabel = totals !== null ? formatSignedCents(totals.profitCents) : null;
+  const pnlUp = totals !== null && totals.profitCents >= 0n;
+
+  const openCollection = useCallback(() => {
+    navigation.navigate("Tabs", { screen: "Portfolio" });
+  }, [navigation]);
 
   return (
     <View style={styles.screen}>
       <AppHeader title="Profile" />
       <ScrollView
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, { paddingBottom: contentBottom }]}
         refreshControl={
           <RefreshControl
             refreshing={(holdings.isRefetching || balance.isRefetching) && !holdings.isLoading && !balance.isLoading}
@@ -129,41 +165,170 @@ export function ProfileScreen() {
           />
         }
       >
-        <View style={styles.identity}>
-          <View style={styles.avatar}>
-            <Icon color={colors.textSecondary} name="person" size={24} />
-          </View>
-          <View style={styles.identityText}>
-            <Text maxFontSizeMultiplier={maxFontScale.body} numberOfLines={1} style={styles.email}>
-              {email || "Unknown account"}
-            </Text>
-            {profile.data ? (
-              <Text maxFontSizeMultiplier={maxFontScale.body} numberOfLines={1} style={styles.handle}>
-                @{profile.data}
+        <View style={styles.hero}>
+          <View style={styles.heroGlow} />
+          <View style={styles.identity}>
+            <View style={styles.avatarRing}>
+              <View style={styles.avatar}>
+                <Text maxFontSizeMultiplier={maxFontScale.display} style={styles.avatarMark}>
+                  {initials(displayName)}
+                </Text>
+              </View>
+            </View>
+            <View style={styles.identityText}>
+              <Text maxFontSizeMultiplier={maxFontScale.display} numberOfLines={1} style={styles.displayName}>
+                {displayName}
               </Text>
-            ) : null}
+              <Text maxFontSizeMultiplier={maxFontScale.body} numberOfLines={1} style={styles.email}>
+                {email || "Unknown account"}
+              </Text>
+              <View style={styles.identityMeta}>
+                {username ? (
+                  <Text maxFontSizeMultiplier={maxFontScale.body} numberOfLines={1} style={styles.handle}>
+                    @{username}
+                  </Text>
+                ) : null}
+                {reviewer ? (
+                  <View style={styles.collectorBadge}>
+                    <Icon color={colors.premium.gold} name="diamond-outline" size={12} />
+                    <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.collectorBadgeLabel}>
+                      Reviewer
+                    </Text>
+                  </View>
+                ) : (
+                  <View style={styles.collectorBadgeMuted}>
+                    <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.collectorBadgeMutedLabel}>
+                      Collector
+                    </Text>
+                  </View>
+                )}
+              </View>
+            </View>
           </View>
         </View>
 
         <ConnectivityBanner offlineDetail="This account may be out of date." />
 
-        <View style={styles.summary}>
-          <Stat
-            label="Balance"
-            value={balanceLabel}
-            onPress={() => navigation.navigate("Wallet")}
-          />
-          <Stat
-            label="Portfolio"
-            value={portfolioLabel}
-            onPress={() => navigation.navigate("Tabs", { screen: "Portfolio" })}
-          />
-          <Stat
-            label="Listings"
-            value={listingsLabel}
-            onPress={() => navigation.navigate("Tabs", { screen: "Portfolio" })}
-          />
+        <View style={styles.summaryCard}>
+          <View style={styles.summaryTop}>
+            <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.summaryKicker}>
+              Portfolio summary
+            </Text>
+            {pnlLabel ? (
+              <Text
+                maxFontSizeMultiplier={maxFontScale.body}
+                style={[styles.summaryPnl, { color: pnlUp ? colors.status.success.solid : colors.status.error.solid }]}
+              >
+                {pnlLabel} all time
+              </Text>
+            ) : null}
+          </View>
+          <View style={styles.summaryRow}>
+            <Stat
+              label="Balance"
+              value={balanceLabel}
+              onPress={() => navigation.navigate("Wallet")}
+            />
+            <View style={styles.summaryDivider} />
+            <Stat
+              label="Portfolio"
+              value={portfolioLabel}
+              onPress={openCollection}
+            />
+            <View style={styles.summaryDivider} />
+            <Stat
+              label="Listings"
+              value={listingsLabel}
+              onPress={openCollection}
+            />
+          </View>
+          {holdings.data !== undefined ? (
+            <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.summaryFoot}>
+              {items.length === 0
+                ? "No collectibles yet"
+                : `${items.length} ${items.length === 1 ? "item" : "items"} in collection`}
+            </Text>
+          ) : null}
         </View>
+
+        <Section
+          actionLabel={items.length > 0 ? "View all" : undefined}
+          title="Collection"
+          onAction={items.length > 0 ? openCollection : undefined}
+        >
+          {holdings.isLoading && items.length === 0 ? (
+            <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.emptyCopy}>
+              Loading your collection…
+            </Text>
+          ) : items.length === 0 ? (
+            <View style={styles.emptyCollection}>
+              <Icon color={colors.premium.gold} name="albums-outline" size={28} />
+              <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.emptyTitle}>
+                Your vault is empty
+              </Text>
+              <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.emptyCopy}>
+                Open a pack or buy from the market to start your collection.
+              </Text>
+              <TertiaryButton label="Browse packs" onPress={() => navigation.navigate("Tabs", { screen: "Packs" })} />
+            </View>
+          ) : (
+            <View style={styles.collectionBody}>
+              <ScrollView
+                horizontal
+                contentContainerStyle={styles.previewRail}
+                showsHorizontalScrollIndicator={false}
+              >
+                {preview.map((item) => (
+                  <Pressable
+                    key={item.ownedItemId}
+                    accessibilityLabel={`${item.name}. Open collection`}
+                    accessibilityRole="button"
+                    onPress={openCollection}
+                    style={styles.previewTile}
+                  >
+                    <CollectibleArt
+                      category={item.category}
+                      fit="contain"
+                      height={88}
+                      imageUrl={item.imageUrl}
+                      style={styles.previewArt}
+                      title={item.name}
+                    />
+                  </Pressable>
+                ))}
+                {items.length > previewLimit ? (
+                  <Pressable
+                    accessibilityLabel={`View ${items.length - previewLimit} more in collection`}
+                    accessibilityRole="button"
+                    onPress={openCollection}
+                    style={styles.previewMore}
+                  >
+                    <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.previewMoreLabel}>
+                      +{items.length - previewLimit}
+                    </Text>
+                  </Pressable>
+                ) : null}
+              </ScrollView>
+              {rarityCounts.length > 0 ? (
+                <View style={styles.rarityRow}>
+                  {rarityCounts.map((row) => (
+                    <View
+                      key={row.rarity}
+                      style={[styles.rarityChip, { backgroundColor: colors.rarity[row.rarity].muted, borderColor: colors.rarity[row.rarity].border }]}
+                    >
+                      <Text
+                        maxFontSizeMultiplier={maxFontScale.body}
+                        style={[styles.rarityChipLabel, { color: colors.rarity[row.rarity].solid }]}
+                      >
+                        {rarityLabel(row.rarity)} · {row.count}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+            </View>
+          )}
+        </Section>
 
         <Section title="Account">
           <Row
@@ -189,13 +354,15 @@ export function ProfileScreen() {
             detail={holdings.data ? listingsCopy(listedCount) : "Items you have for sale"}
             icon="pricetags-outline"
             label="Listings"
-            onPress={() => navigation.navigate("Tabs", { screen: "Portfolio" })}
+            onPress={openCollection}
           />
         </Section>
 
         <Section title="Settings">
           <View style={styles.row}>
-            <Icon color={colors.textSecondary} name="phone-portrait-outline" size={22} />
+            <View style={styles.rowIcon}>
+              <Icon color={colors.accent.solid} name="phone-portrait-outline" size={20} />
+            </View>
             <View style={styles.rowText}>
               <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.rowLabel}>Haptics</Text>
               <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.rowDetail}>
@@ -267,6 +434,39 @@ function listingsCopy(count: number): string {
   return `${count} items listed`;
 }
 
+/** Hide auth/system ids so Profile never shows a raw UUID-style handle. */
+function publicUsername(value: string | null | undefined, userId: string): string | null {
+  if (!value) return null;
+  const cleaned = value.trim().replace(/^@/, "");
+  if (!cleaned) return null;
+  const compactUserId = userId.replace(/-/g, "");
+  if (cleaned === userId || cleaned === compactUserId) return null;
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleaned)) return null;
+  if (/^[0-9a-f]{32}$/i.test(cleaned)) return null;
+  if (/^u[0-9a-f]{20,}$/i.test(cleaned)) return null;
+  return cleaned;
+}
+
+function initials(name: string): string {
+  const parts = name.trim().split(/[\s._-]+/).filter((part) => part.length > 0);
+  const first = parts[0]?.[0];
+  const second = parts.length > 1 ? parts[1]?.[0] : parts[0]?.[1];
+  return `${first ?? "G"}${second ?? "H"}`.toUpperCase();
+}
+
+function countByRarity(items: readonly OwnedHolding[]): { rarity: Rarity; count: number }[] {
+  const counts = new Map<Rarity, number>();
+  for (const item of items) {
+    if (!isRarity(item.rarity)) {
+      continue;
+    }
+    counts.set(item.rarity, (counts.get(item.rarity) ?? 0) + 1);
+  }
+  return rarityOrder
+    .filter((rarity) => (counts.get(rarity) ?? 0) > 0)
+    .map((rarity) => ({ rarity, count: counts.get(rarity)! }));
+}
+
 function Stat({
   label,
   value,
@@ -291,12 +491,27 @@ function Stat({
   );
 }
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
+function Section({
+  title,
+  actionLabel,
+  onAction,
+  children,
+}: {
+  title: string;
+  actionLabel?: string;
+  onAction?: () => void;
+  children: ReactNode;
+}) {
   return (
     <View style={styles.section}>
-      <Text accessibilityRole="header" maxFontSizeMultiplier={maxFontScale.body} style={styles.sectionTitle}>
-        {title}
-      </Text>
+      <View style={styles.sectionHead}>
+        <Text accessibilityRole="header" maxFontSizeMultiplier={maxFontScale.body} style={styles.sectionTitle}>
+          {title}
+        </Text>
+        {actionLabel && onAction ? (
+          <TertiaryButton label={actionLabel} onPress={onAction} size="sm" />
+        ) : null}
+      </View>
       <View style={styles.group}>{children}</View>
     </View>
   );
@@ -315,14 +530,17 @@ function Row({
   detailIsMoney?: boolean;
   onPress: () => void;
 }) {
+  const pressMotion = usePressMotion("discovery");
   return (
     <Pressable
       accessibilityLabel={`${label}. ${detail}`}
       accessibilityRole="button"
       onPress={onPress}
-      style={({ pressed }) => [styles.row, pressed ? styles.rowPressed : null]}
+      style={({ pressed }) => [styles.row, pressed ? styles.rowPressed : null, pressMotion(pressed)]}
     >
-      <Icon color={colors.textSecondary} name={icon} size={22} />
+      <View style={styles.rowIcon}>
+        <Icon color={colors.accent.solid} name={icon} size={20} />
+      </View>
       <View style={styles.rowText}>
         <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.rowLabel}>{label}</Text>
         <Text
@@ -344,59 +562,147 @@ const styles = StyleSheet.create({
     backgroundColor: colors.backgroundPrimary,
   },
   content: {
-    paddingBottom: spacing.xxl,
     paddingHorizontal: layout.screenPadding,
     paddingTop: spacing.sm,
+  },
+  hero: {
+    marginBottom: spacing.md,
+    overflow: "hidden",
+    paddingBottom: spacing.sm,
+  },
+  heroGlow: {
+    backgroundColor: colors.premium.goldMuted,
+    borderRadius: radius.full,
+    height: 160,
+    left: -40,
+    opacity: 0.9,
+    position: "absolute",
+    top: -70,
+    width: 220,
   },
   identity: {
     alignItems: "center",
     flexDirection: "row",
     gap: spacing.md,
   },
+  avatarRing: {
+    alignItems: "center",
+    backgroundColor: colors.premium.goldMuted,
+    borderColor: colors.premium.goldBorder,
+    borderRadius: radius.full,
+    borderWidth: 1,
+    height: 72,
+    justifyContent: "center",
+    width: 72,
+  },
   avatar: {
     alignItems: "center",
-    backgroundColor: colors.surfaceSecondary,
+    backgroundColor: colors.surfaceElevated,
     borderRadius: radius.full,
-    height: 48,
+    height: 60,
     justifyContent: "center",
-    width: 48,
+    width: 60,
+  },
+  avatarMark: {
+    ...typography.title,
+    color: colors.premium.gold,
   },
   identityText: {
     flex: 1,
+    gap: spacing.xxs,
     minWidth: 0,
   },
-  email: {
-    ...typography.bodyMedium,
+  displayName: {
+    ...typography.titleLarge,
     color: colors.textPrimary,
+  },
+  email: {
+    ...typography.bodySmall,
+    color: colors.textSecondary,
+  },
+  identityMeta: {
+    alignItems: "center",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+    marginTop: spacing.xxs,
   },
   handle: {
     ...typography.caption,
     color: colors.textTertiary,
   },
-  notice: {
-    ...typography.bodySmall,
-    color: colors.textSecondary,
-    marginTop: spacing.md,
+  collectorBadge: {
+    alignItems: "center",
+    backgroundColor: colors.premium.goldMuted,
+    borderColor: colors.premium.goldBorder,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: spacing.xxs,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xxs,
   },
-  summary: {
+  collectorBadgeLabel: {
+    ...typography.label,
+    color: colors.premium.gold,
+    fontSize: 10,
+  },
+  collectorBadgeMuted: {
+    backgroundColor: colors.accent.muted,
+    borderColor: colors.accent.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xxs,
+  },
+  collectorBadgeMutedLabel: {
+    ...typography.label,
+    color: colors.accent.solid,
+    fontSize: 10,
+  },
+  summaryCard: {
     backgroundColor: colors.surfacePrimary,
     borderColor: colors.borderSubtle,
     borderRadius: radius.card,
     borderWidth: 1,
+    gap: spacing.md,
+    marginTop: spacing.md,
+    padding: spacing.base,
+  },
+  summaryTop: {
+    alignItems: "center",
     flexDirection: "row",
-    marginTop: layout.sectionGap,
-    overflow: "hidden",
+    justifyContent: "space-between",
+    gap: spacing.sm,
+  },
+  summaryKicker: {
+    ...typography.label,
+    color: colors.textTertiary,
+  },
+  summaryPnl: {
+    ...typography.caption,
+  },
+  summaryRow: {
+    flexDirection: "row",
+  },
+  summaryDivider: {
+    backgroundColor: colors.borderSubtle,
+    width: StyleSheet.hairlineWidth,
+  },
+  summaryFoot: {
+    ...typography.caption,
+    color: colors.textTertiary,
   },
   stat: {
     flex: 1,
     gap: spacing.xxs,
-    minHeight: 64,
+    minHeight: 56,
     minWidth: 0,
     paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.md,
+    paddingVertical: spacing.xs,
   },
   statPressed: {
-    backgroundColor: colors.surfacePressed,
+    opacity: 0.85,
   },
   statLabel: {
     ...typography.label,
@@ -409,10 +715,16 @@ const styles = StyleSheet.create({
   section: {
     marginTop: layout.sectionGap,
   },
+  sectionHead: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: spacing.sm,
+    minHeight: layout.minTouchTarget,
+  },
   sectionTitle: {
     ...typography.label,
     color: colors.textTertiary,
-    marginBottom: spacing.sm,
   },
   group: {
     backgroundColor: colors.surfacePrimary,
@@ -420,6 +732,66 @@ const styles = StyleSheet.create({
     borderRadius: radius.card,
     borderWidth: 1,
     overflow: "hidden",
+  },
+  collectionBody: {
+    gap: spacing.md,
+    padding: spacing.md,
+  },
+  previewRail: {
+    gap: spacing.sm,
+  },
+  previewTile: {
+    borderColor: colors.borderSubtle,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    overflow: "hidden",
+    width: 72,
+  },
+  previewArt: {
+    borderRadius: 0,
+  },
+  previewMore: {
+    alignItems: "center",
+    backgroundColor: colors.surfaceElevated,
+    borderColor: colors.borderSubtle,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    height: 88,
+    justifyContent: "center",
+    width: 72,
+  },
+  previewMoreLabel: {
+    ...typography.heading,
+    color: colors.accent.solid,
+  },
+  rarityRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.xs,
+  },
+  rarityChip: {
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xxs,
+  },
+  rarityChipLabel: {
+    ...typography.label,
+    fontSize: 10,
+  },
+  emptyCollection: {
+    alignItems: "flex-start",
+    gap: spacing.sm,
+    padding: spacing.base,
+  },
+  emptyTitle: {
+    ...typography.heading,
+    color: colors.textPrimary,
+  },
+  emptyCopy: {
+    ...typography.bodySmall,
+    color: colors.textSecondary,
+    padding: spacing.base,
   },
   row: {
     alignItems: "center",
@@ -431,6 +803,14 @@ const styles = StyleSheet.create({
   },
   rowPressed: {
     backgroundColor: colors.surfacePressed,
+  },
+  rowIcon: {
+    alignItems: "center",
+    backgroundColor: colors.accent.muted,
+    borderRadius: radius.sm,
+    height: 36,
+    justifyContent: "center",
+    width: 36,
   },
   rowText: {
     flex: 1,

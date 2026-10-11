@@ -31,7 +31,7 @@ begin
   select id
     into catalog_id
   from public.catalog_items
-  where name = 'Harbor Fox';
+  where name = 'Emberkin';
 
   quote := public.listing_quote(45000);
   if (quote ->> 'feeCents')::bigint <> public.marketplace_fee_cents(45000)

@@ -76,7 +76,7 @@ declare
   starter_stock bigint;
   market_sum bigint;
 begin
-  select id into catalog_id from public.catalog_items where name = 'Harbor Fox';
+  select id into catalog_id from public.catalog_items where name = 'Emberkin';
   select id into starter
   from public.pack_skus
   where category = 'TRADING_CARD' and tier = 'Starter';

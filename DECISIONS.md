@@ -77,7 +77,7 @@ Users may also make mock deposits (`$100`, `$500`, `$1,000`, and a custom amount
 
 ### Pack reservations
 
-The cart primary action is **Review Purchase**. It does not charge. The review step charges with **Confirm Purchase · $X** and shows `Confirming purchase…` while the request is in flight. If a line changes after review, the reviewed total stays on screen and Confirm Purchase stays disabled until the user returns to the cart.
+The cart primary action is **Pay · $X**. It charges from the wallet and shows `Confirming purchase…` while the request is in flight. There is no separate Review Purchase step. If the server rejects because the cart changed, the buyer stays on Cart, refreshes the lines, and pays again.
 
 Adding a pack to the cart reserves inventory for **5 minutes**.
 
@@ -149,18 +149,18 @@ Search and filters run on the loaded board. There is no server catalog search. C
 
 Favorites are omitted. There is no favorite store.
 
-Adding a listing from listing detail uses **Add to Cart** (stays on the listing) or **Buy Now** (opens Review Purchase). Buy Now still does not charge. Confirm Purchase on the review step charges.
+Adding a listing from listing detail uses **Add to Cart** (stays on the listing) or **Buy Now** (adds the listing and opens Cart). Payment happens on Cart with **Pay · $X**.
 
 ### No partial checkout
 
 If any cart line is invalid or its authoritative price or quantity differs from what the user confirmed, the whole checkout stops and rolls back.
 
-The client refreshes the affected lines, shows what changed, and requires confirmation again.
+The client refreshes the affected lines, shows what changed, and requires the buyer to pay again from Cart.
 
 ```text
 Your cart changed
 
-One or more items changed since you reviewed your order.
+One or more items changed. Check the cart and pay again.
 ```
 
 There is one checkout path for mixed carts. Pack lines and marketplace lines commit in the same transaction or not at all.
@@ -572,3 +572,10 @@ The shareable Android build is the release APK from `npm run apk`, pointed at th
 | 26 | Requirement audit | Not started |
 
 `npm run apk` builds the release APK. The bundle embeds the hosted project and does not read `app/.env`. The requirement audit has not been done.
+
+
+## Five evergreen tiers and bundled artwork
+
+The catalog has five evergreen pack types per category, while the sneaker and watch item pools each contain five collectible designs. Evergreen choices total fifteen; the existing timed drop remains separate. The compact pool preserves every rarity so published odds and expected-value validation still work. Existing databases update active pack pools without deleting historical catalog rows, purchases or ownership records.
+
+Original art is bundled locally: twenty-seven individual fictional card illustrations and three shared category packaging designs. Tier identity remains explicit UI text. This supports offline previews without CDN credentials. Server image URLs retain precedence with local fallback. Actual branded sneaker/watch item photography is outside this image set. The artwork resolver is presentation-only and never affects rarity, contents, prices or ownership.

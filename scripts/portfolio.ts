@@ -7,7 +7,7 @@ function assert(condition: boolean, message: string): void {
 }
 
 const finch = {
-  name: "Cedar Finch",
+  name: "Gust Finch",
   category: "TRADING_CARD" as const,
   estimatedValueCents: 350n,
   acquisitionPriceCents: 1000n,
@@ -41,10 +41,10 @@ assert(formatSignedCents(1000n) === "+$10.00", "a gain was not shown from cents"
 assert(formatSignedCents(0n) === "$0.00", "a flat holding grew a sign");
 
 const cards = selectHoldings(items, "TRADING_CARD", "recent");
-assert(cards.length === 1 && cards[0]?.name === "Cedar Finch", "Cards included another category");
+assert(cards.length === 1 && cards[0]?.name === "Gust Finch", "Cards included another category");
 assert(selectHoldings(items, "SNEAKER", "value").length === 1, "Sneakers dropped the sneaker");
 assert(selectHoldings(items, "WATCH", "pnl").length === 1, "Watches dropped the watch");
-assert(selectHoldings(items, "ALL", "recent").map((item) => item.name).join(",") === "Cedar Finch,Night Runner,Harbor Dial", "recent order was not newest first");
+assert(selectHoldings(items, "ALL", "recent").map((item) => item.name).join(",") === "Gust Finch,Night Runner,Harbor Dial", "recent order was not newest first");
 assert(selectHoldings(items, "ALL", "value")[0]?.name === "Harbor Dial", "value sort did not lead with the highest catalog value");
 assert(selectHoldings(items, "ALL", "pnl")[0]?.name === "Night Runner", "P&L sort did not lead with the largest gain");
 

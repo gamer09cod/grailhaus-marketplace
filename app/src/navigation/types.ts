@@ -1,5 +1,7 @@
 import type { NavigatorScreenParams } from "@react-navigation/native";
 
+import type { OrderSummaryParams } from "../features/cart/orderSummary";
+
 export type PackCategory = "TRADING_CARD" | "SNEAKER" | "WATCH";
 
 export type MainTabParamList = {
@@ -18,7 +20,8 @@ export type AppStackParamList = {
   Category: { category: PackCategory };
   PackDetail: { packId: string };
   MarketDetail: { listingId: string };
-  Cart: { startReview?: boolean } | undefined;
+  Cart: undefined;
+  OrderSummary: OrderSummaryParams;
   Wallet: undefined;
   Listing: { ownedItemId: string };
   Qa: undefined;

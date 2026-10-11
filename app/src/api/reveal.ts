@@ -12,6 +12,7 @@ export type RevealMilestone = "OPEN" | "REVEALING_CARD" | "CARD_REVEALED" | "PAC
 
 export type RevealCard = {
   catalogItemId: string;
+  imageUrl?: string | null;
   name: string;
   rarity: string;
   revealOrder: number;
@@ -46,7 +47,8 @@ const revealPackSelect = `
     catalog_item_id,
     catalog_items (
       name,
-      current_value_cents
+      current_value_cents,
+      image_url
     )
   )
 `;
@@ -221,7 +223,7 @@ function parseRevealPack(entry: {
     reveal_order: number;
     rarity: string;
     catalog_item_id: string;
-    catalog_items: { name: string; current_value_cents: number | string } | { name: string; current_value_cents: number | string }[] | null;
+    catalog_items: { name: string; current_value_cents: number | string; image_url: string | null } | { name: string; current_value_cents: number | string; image_url: string | null }[] | null;
   }[] | null;
 }): RevealPack | null {
   const sku = Array.isArray(entry.pack_skus) ? entry.pack_skus[0] : entry.pack_skus;
@@ -239,6 +241,7 @@ function parseRevealPack(entry: {
     }
     cards.push({
       catalogItemId: content.catalog_item_id,
+      imageUrl: item.image_url,
       name: item.name,
       rarity: content.rarity,
       revealOrder: content.reveal_order,

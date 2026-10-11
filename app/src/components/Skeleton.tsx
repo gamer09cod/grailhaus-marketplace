@@ -2,6 +2,7 @@ import { useEffect, useMemo, type ReactNode } from "react";
 import { Animated, StyleSheet, View, type DimensionValue, type ViewStyle } from "react-native";
 
 import {
+  catalogGrid,
   colors,
   duration,
   easing,
@@ -11,8 +12,6 @@ import {
   useReducedMotion,
   type MotionProfile,
 } from "../theme";
-
-const homeTileWidth = 168;
 
 type SkeletonBoneProps = {
   width?: DimensionValue;
@@ -86,24 +85,42 @@ function SkeletonFrame({ accessibilityLabel, children, style }: SkeletonFramePro
   );
 }
 
-export function PackCardSkeleton({ motion = "discovery" }: { motion?: MotionProfile }) {
+export function PackCardSkeleton({
+  width,
+  artHeight,
+  motion = "discovery",
+}: {
+  width?: number;
+  artHeight?: number;
+  motion?: MotionProfile;
+}) {
+  const tileWidth = width ?? 168;
+  const tileArt = artHeight ?? Math.round(tileWidth * 1.25);
   return (
-    <SkeletonFrame accessibilityLabel="Loading pack" style={styles.card}>
-      <SkeletonBone borderRadius={0} height={168} motion={motion} />
+    <SkeletonFrame accessibilityLabel="Loading pack" style={{ ...styles.card, width: tileWidth }}>
+      <SkeletonBone borderRadius={0} height={tileArt} motion={motion} />
       <View style={styles.cardInfo}>
-        <SkeletonBone height={16} motion={motion} width="72%" />
+        <SkeletonBone height={14} motion={motion} width="48%" />
+        <SkeletonBone height={12} motion={motion} width="80%" />
         <SkeletonBone height={12} motion={motion} width="40%" />
-        <SkeletonBone height={18} motion={motion} width="36%" />
       </View>
     </SkeletonFrame>
   );
 }
 
-export function PackListSkeleton({ count = 3 }: { count?: number }) {
+export function PackListSkeleton({
+  width,
+  artHeight,
+  count = 6,
+}: {
+  width: number;
+  artHeight: number;
+  count?: number;
+}) {
   return (
-    <SkeletonFrame accessibilityLabel="Loading packs" style={styles.stack}>
+    <SkeletonFrame accessibilityLabel="Loading packs" style={styles.grid}>
       {Array.from({ length: count }, (_, index) => (
-        <PackCardSkeleton key={index} />
+        <PackCardSkeleton key={index} artHeight={artHeight} width={width} />
       ))}
     </SkeletonFrame>
   );
@@ -131,7 +148,7 @@ function GridCardSkeleton({ width, artHeight, motion = "discovery" }: GridCardSk
 export function MarketGridSkeleton({
   width,
   artHeight,
-  count = 4,
+  count = 6,
 }: {
   width: number;
   artHeight: number;
@@ -170,16 +187,24 @@ export function HoldingGridSkeleton({
   );
 }
 
-export function HomeRailSkeleton({ count = 3 }: { count?: number }) {
+export function HomeRailSkeleton({
+  width,
+  artHeight,
+  count = 3,
+}: {
+  width: number;
+  artHeight: number;
+  count?: number;
+}) {
   return (
     <SkeletonFrame accessibilityLabel="Loading featured packs" style={styles.rail}>
       {Array.from({ length: count }, (_, index) => (
-        <View key={index} style={styles.tile}>
-          <SkeletonBone borderRadius={0} height={120} />
+        <View key={index} style={[styles.tile, { width }]}>
+          <SkeletonBone borderRadius={0} height={artHeight} />
           <View style={styles.cardInfo}>
-            <SkeletonBone height={14} width="80%" />
-            <SkeletonBone height={12} width="50%" />
-            <SkeletonBone height={16} width="40%" />
+            <SkeletonBone height={14} width="48%" />
+            <SkeletonBone height={12} width="80%" />
+            <SkeletonBone height={12} width="40%" />
           </View>
         </View>
       ))}
@@ -302,8 +327,8 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   cardInfo: {
-    gap: spacing.sm,
-    padding: spacing.md,
+    gap: spacing.xs,
+    padding: spacing.sm,
   },
   stack: {
     gap: spacing.md,
@@ -311,7 +336,7 @@ const styles = StyleSheet.create({
   grid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: spacing.md,
+    gap: catalogGrid.gap,
   },
   summaryBones: {
     gap: spacing.sm,
@@ -319,7 +344,7 @@ const styles = StyleSheet.create({
   },
   rail: {
     flexDirection: "row",
-    gap: spacing.md,
+    gap: catalogGrid.gap,
   },
   tile: {
     backgroundColor: colors.surfacePrimary,
@@ -327,7 +352,6 @@ const styles = StyleSheet.create({
     borderRadius: radius.card,
     borderWidth: 1,
     overflow: "hidden",
-    width: homeTileWidth,
   },
   dropRow: {
     backgroundColor: colors.surfacePrimary,

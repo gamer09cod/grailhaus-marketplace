@@ -6,6 +6,7 @@ import { AdminScreen } from "../features/admin/AdminScreen";
 import { useAuth } from "../features/auth/AuthProvider";
 import { AuthScreen } from "../features/auth/AuthScreen";
 import { CartScreen } from "../features/cart/CartScreen";
+import { OrderSummaryScreen } from "../features/cart/OrderSummaryScreen";
 import { ListingScreen } from "../features/collection/ListingScreen";
 import { DropsScreen } from "../features/drops/DropsScreen";
 import { MarketDetailScreen } from "../features/market/MarketDetailScreen";
@@ -49,6 +50,7 @@ export function RootNavigator() {
           <AppStack.Screen name="PackDetail" component={PackDetailScreen} />
           <AppStack.Screen name="MarketDetail" component={MarketDetailScreen} />
           <AppStack.Screen name="Cart" component={CartScreen} />
+          <AppStack.Screen name="OrderSummary" component={OrderSummaryScreen} />
           <AppStack.Screen name="Wallet" component={WalletScreen} />
           <AppStack.Screen name="Activity" component={ActivityScreen} />
           <AppStack.Screen name="Purchases" component={PurchasesScreen} />

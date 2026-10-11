@@ -2,7 +2,7 @@ import { useCallback, useMemo, useState } from "react";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { FlatList, Platform, RefreshControl, StyleSheet, View } from "react-native";
+import { FlatList, Platform, RefreshControl, StyleSheet, useWindowDimensions, View } from "react-native";
 
 import { AppBottomSheet, SheetOption, SheetTrigger } from "../../components/AppBottomSheet";
 import { Chip, ChipGroup } from "../../components/Chip";
@@ -12,12 +12,11 @@ import { ErrorState } from "../../components/ErrorState";
 import { PackListSkeleton } from "../../components/Skeleton";
 import { TertiaryButton } from "../../components/buttons";
 import type { AppStackParamList, PackCategory } from "../../navigation/types";
-import { colors, layout, spacing, typography } from "../../theme";
+import { catalogGrid, catalogTileMetrics, colors, layout, spacing, typography } from "../../theme";
 import type { TimedDrop } from "../drops/board";
 import { useDropBoard } from "../drops/useDropBoard";
 import { PackCard, type PackCardBadge } from "./PackCard";
 import {
-  categoryLabel,
   loadShelfPacks,
   packTierClass,
   packTierClassLabel,
@@ -25,6 +24,7 @@ import {
   type PackTierClass,
   type ShelfPack,
 } from "./packs";
+
 export type PacksCategoryFilter = "ALL" | PackCategory | "DROPS";
 
 const categoryChips: { id: PacksCategoryFilter; label: string }[] = [
@@ -47,6 +47,8 @@ const emptyDrops: TimedDrop[] = [];
 export function PackBrowser({ initialCategory = "ALL" }: { initialCategory?: PacksCategoryFilter }) {
   const navigation = useNavigation<NativeStackNavigationProp<AppStackParamList>>();
   const queryClient = useQueryClient();
+  const { width: windowWidth } = useWindowDimensions();
+  const { width: cardWidth, artHeight, gap } = catalogTileMetrics(windowWidth);
   const [category, setCategory] = useState<PacksCategoryFilter>(initialCategory);
   const [tier, setTier] = useState<PackTierClass | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -60,28 +62,39 @@ export function PackBrowser({ initialCategory = "ALL" }: { initialCategory?: Pac
   );
 
   const rows = useMemo(
-    () => visibleRows(category, tier, packs.data ?? emptyPacks, drops.data?.drops ?? emptyDrops),
+    () => visibleRows(
+      category,
+      tier,
+      packs.data ?? emptyPacks,
+      drops.data?.drops ?? emptyDrops,
+    ),
     [category, drops.data?.drops, packs.data, tier],
   );
-  const empty = !packs.isLoading && !drops.isLoading && rows.length === 0;
-  const refreshing = (packs.isRefetching || drops.isRefetching) && !packs.isLoading && !drops.isLoading;
+  const loading = packs.isLoading || (category === "DROPS" && drops.isLoading);
+  const empty = !loading && rows.length === 0;
+  const refreshing = (packs.isRefetching || drops.isRefetching)
+    && !packs.isLoading
+    && !drops.isLoading;
 
-  const openPack = useCallback((packId: string) => {
-    navigation.navigate("PackDetail", { packId });
+  const openRow = useCallback((row: BrowseRow) => {
+    navigation.navigate("PackDetail", { packId: row.packId });
   }, [navigation]);
 
   const renderRow = useCallback(({ item }: { item: BrowseRow }) => (
     <PackCard
+      artHeight={artHeight}
       availability={item.availability}
       badges={item.badges}
       category={item.category}
+      imageUrl={item.imageUrl}
       name={item.name}
-      packId={item.packId}
+      packId={item.id}
       priceCents={item.priceCents}
       tier={item.tier}
-      onOpen={openPack}
+      width={cardWidth}
+      onOpen={() => openRow(item)}
     />
-  ), [openPack]);
+  ), [artHeight, cardWidth, openRow]);
 
   const listHeader = (
     <View style={styles.header}>
@@ -100,7 +113,9 @@ export function PackBrowser({ initialCategory = "ALL" }: { initialCategory?: Pac
           onRetry={() => void drops.refetch()}
         />
       ) : null}
-      {packs.isLoading || (category === "DROPS" && drops.isLoading) ? <PackListSkeleton /> : null}
+      {loading ? (
+        <PackListSkeleton artHeight={artHeight} width={cardWidth} />
+      ) : null}
       {empty ? (
         <EmptyState icon="cube-outline" title={emptyCopy(category, tier)} />
       ) : null}
@@ -110,7 +125,7 @@ export function PackBrowser({ initialCategory = "ALL" }: { initialCategory?: Pac
   return (
     <View style={styles.screen}>
       <View style={styles.filters}>
-        <ChipGroup accessibilityLabel="Pack category">
+        <ChipGroup accessibilityLabel="Category">
           {categoryChips.map((chip) => (
             <Chip
               key={chip.id}
@@ -126,13 +141,15 @@ export function PackBrowser({ initialCategory = "ALL" }: { initialCategory?: Pac
         />
       </View>
       <FlatList
-        ItemSeparatorComponent={RowGap}
         ListHeaderComponent={listHeader}
+        columnWrapperStyle={[styles.columns, { gap }]}
         contentContainerStyle={styles.content}
-        data={empty || packs.isLoading || (category === "DROPS" && drops.isLoading) ? [] : rows}
-        initialNumToRender={6}
+        data={empty || loading ? [] : rows}
+        extraData={`${cardWidth}`}
+        initialNumToRender={9}
         keyExtractor={(row) => row.id}
-        maxToRenderPerBatch={6}
+        maxToRenderPerBatch={9}
+        numColumns={catalogGrid.columns}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -166,7 +183,7 @@ export function PackBrowser({ initialCategory = "ALL" }: { initialCategory?: Pac
         }
       >
         <SheetOption
-          label="Any tier"
+          label="Any price"
           selected={tier === null}
           onPress={() => {
             setTier(null);
@@ -189,10 +206,6 @@ export function PackBrowser({ initialCategory = "ALL" }: { initialCategory?: Pac
   );
 }
 
-function RowGap() {
-  return <View style={styles.rowGap} />;
-}
-
 type BrowseRow = {
   id: string;
   packId: string;
@@ -202,6 +215,7 @@ type BrowseRow = {
   priceCents: bigint;
   availability: string;
   badges: PackCardBadge[];
+  imageUrl?: string | null;
 };
 
 function visibleRows(
@@ -210,21 +224,26 @@ function visibleRows(
   packs: ShelfPack[],
   drops: TimedDrop[],
 ): BrowseRow[] {
-  const source = category === "DROPS" ? drops.filter(dropIsBrowsable).map(dropRow) : packs.map(shelfRow);
-  return source.filter((row) => {
-    if (category !== "ALL" && category !== "DROPS" && row.category !== category) {
-      return false;
-    }
-    if (tier && packTierClass(row.priceCents) !== tier) {
-      return false;
-    }
-    return true;
-  });
+  if (category === "DROPS") {
+    return drops.filter(dropIsBrowsable).map(dropRow).filter((row) => matchesTier(row, tier));
+  }
+
+  return packs
+    .filter((pack) => category === "ALL" || pack.category === category)
+    .map(shelfPackRow)
+    .filter((row) => matchesTier(row, tier));
 }
 
-function shelfRow(pack: ShelfPack): BrowseRow {
+function matchesTier(row: BrowseRow, tier: PackTierClass | null): boolean {
+  if (!tier) {
+    return true;
+  }
+  return packTierClass(row.priceCents) === tier;
+}
+
+function shelfPackRow(pack: ShelfPack): BrowseRow {
   return {
-    id: pack.id,
+    id: `pack:${pack.id}`,
     packId: pack.id,
     category: pack.category,
     name: pack.name,
@@ -246,7 +265,7 @@ function dropRow(drop: TimedDrop): BrowseRow {
     badges.push("SOLD_OUT");
   }
   return {
-    id: drop.dropId,
+    id: `drop:${drop.dropId}`,
     packId: drop.packSkuId,
     category: drop.category,
     name: drop.name,
@@ -276,10 +295,16 @@ function emptyCopy(category: PacksCategoryFilter, tier: PackTierClass | null): s
     return "No timed drops are scheduled.";
   }
   if (tier) {
-    return "No packs match those filters.";
+    return "Nothing matches those filters.";
   }
-  if (category !== "ALL" && category !== "DROPS") {
-    return `Nothing in ${categoryLabel(category)} is on the shelf.`;
+  if (category === "SNEAKER") {
+    return "No sneaker packs are on the shelf.";
+  }
+  if (category === "WATCH") {
+    return "No watch packs are on the shelf.";
+  }
+  if (category === "TRADING_CARD") {
+    return "No card packs are on the shelf.";
   }
   return "Nothing is on the shelf right now.";
 }
@@ -303,8 +328,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: layout.screenPadding,
     paddingTop: spacing.md,
   },
-  rowGap: {
-    height: spacing.base,
+  columns: {
+    marginBottom: catalogGrid.gap,
   },
   notice: {
     ...typography.bodySmall,

@@ -67,10 +67,12 @@ export function AuthScreen() {
       >
         <View style={styles.form}>
           <Text accessibilityRole="header" maxFontSizeMultiplier={maxFontScale.display} style={styles.brand}>
-            GrailHaus
+            Grail<Text style={styles.brandAccent}>Haus</Text>
           </Text>
           <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.lead}>
-            {mode === "sign-in" ? "Sign in to your wallet." : "Create an account. It starts at $0.00."}
+            {mode === "sign-in"
+              ? "Sign in to open packs, trade, and manage your collection."
+              : "Create an account. Your wallet starts at $0.00."}
           </Text>
           <TextInput
             accessibilityLabel="Email"
@@ -154,6 +156,10 @@ const styles = StyleSheet.create({
   brand: {
     ...typography.displayXL,
     color: colors.textPrimary,
+    letterSpacing: 0.2,
+  },
+  brandAccent: {
+    color: colors.accent.solid,
   },
   lead: {
     ...typography.body,
@@ -163,9 +169,7 @@ const styles = StyleSheet.create({
   input: {
     ...typography.body,
     backgroundColor: colors.surfacePrimary,
-    borderColor: colors.borderSubtle,
     borderRadius: radius.button,
-    borderWidth: 1,
     color: colors.textPrimary,
     minHeight: layout.minTouchTarget,
     paddingHorizontal: spacing.base,

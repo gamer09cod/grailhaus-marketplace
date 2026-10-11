@@ -26,7 +26,7 @@ import { ErrorState } from "../../components/ErrorState";
 import { MarketGridSkeleton } from "../../components/Skeleton";
 import { IconButton, TertiaryButton } from "../../components/buttons";
 import type { AppStackParamList, MainTabParamList } from "../../navigation/types";
-import { colors, layout, maxFontScale, radius, spacing, typography } from "../../theme";
+import { catalogGrid, catalogTileMetrics, colors, layout, maxFontScale, radius, spacing, typography } from "../../theme";
 import { timeAgo } from "../shelf/timeAgo";
 import {
   packTierClassLabel,
@@ -125,9 +125,7 @@ export function MarketScreen() {
   const extraFilters = (rarity ? 1 : 0) + (priceBand ? 1 : 0) + (belowFmv ? 1 : 0);
   const sortLabel = sortChips.find((chip) => chip.id === sort)?.label ?? "Recent";
   const showFmvFilter = listings.some((listing) => listing.currentValueCents !== null);
-  const columnGap = spacing.md;
-  const cardWidth = (width - layout.screenPadding * 2 - columnGap) / 2;
-  const artHeight = Math.round(cardWidth);
+  const { width: cardWidth, artHeight, gap } = catalogTileMetrics(width);
 
   const header = (
     <View style={styles.notices}>
@@ -215,14 +213,14 @@ export function MarketScreen() {
       </View>
       <FlatList
         ListHeaderComponent={header}
-        columnWrapperStyle={styles.columns}
+        columnWrapperStyle={[styles.columns, { gap }]}
         contentContainerStyle={styles.content}
         data={visible}
         extraData={`${nowMs}:${cardWidth}`}
-        initialNumToRender={8}
+        initialNumToRender={9}
         keyExtractor={(listing) => listing.listingId}
-        maxToRenderPerBatch={8}
-        numColumns={2}
+        maxToRenderPerBatch={9}
+        numColumns={catalogGrid.columns}
         refreshControl={
           <RefreshControl
             refreshing={market.isRefetching && !market.isLoading}
@@ -332,9 +330,7 @@ const styles = StyleSheet.create({
   search: {
     alignItems: "center",
     backgroundColor: colors.surfacePrimary,
-    borderColor: colors.borderSubtle,
     borderRadius: radius.button,
-    borderWidth: 1,
     flexDirection: "row",
     gap: spacing.sm,
     minHeight: layout.minTouchTarget,
@@ -364,7 +360,6 @@ const styles = StyleSheet.create({
     paddingTop: spacing.md,
   },
   columns: {
-    gap: spacing.md,
-    marginBottom: spacing.md,
+    marginBottom: catalogGrid.gap,
   },
 });

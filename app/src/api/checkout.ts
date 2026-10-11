@@ -6,11 +6,21 @@ import { centsFromWire } from "../utils/money";
 
 const inflightKey = "grailhaus.checkout.inflight";
 
+export type InflightOrderLine = {
+  lineId: string;
+  name: string;
+  quantity: number;
+  priceCents: string;
+  lineType: "PACK" | "MARKETPLACE_LISTING";
+};
+
 export type InflightCheckout = {
   cartId: string;
   idempotencyKey: string;
   expectedTotalCents: string;
   lines: { lineId: string; quantity: number; snapshotPriceCents: string }[];
+  /** Captured at Pay for the post-checkout order summary. */
+  orderLines?: InflightOrderLine[];
 };
 
 export type CheckoutLine = {
@@ -27,7 +37,10 @@ export type CheckoutReceipt = {
   idempotencyKey: string;
   packCount: number;
   listingCount: number;
+  /** Trading-card packs that still need reveal. */
   sealedPackIds: string[];
+  /** Sneaker/watch packs already in the collection (no reveal). */
+  deliveredPackCount: number;
 };
 
 export class CheckoutRejected extends Error {
@@ -77,11 +90,11 @@ export function isInflightCheckout(value: unknown): value is InflightCheckout {
     expectedTotalCents?: unknown;
     lines?: unknown;
   };
-  return typeof record.cartId === "string"
-    && typeof record.idempotencyKey === "string"
-    && typeof record.expectedTotalCents === "string"
-    && Array.isArray(record.lines)
-    && record.lines.every((line) => {
+  if (typeof record.cartId !== "string"
+    || typeof record.idempotencyKey !== "string"
+    || typeof record.expectedTotalCents !== "string"
+    || !Array.isArray(record.lines)
+    || !record.lines.every((line) => {
       if (typeof line !== "object" || line === null) {
         return false;
       }
@@ -89,7 +102,30 @@ export function isInflightCheckout(value: unknown): value is InflightCheckout {
       return typeof row.lineId === "string"
         && typeof row.quantity === "number"
         && typeof row.snapshotPriceCents === "string";
-    });
+    })) {
+    return false;
+  }
+  const orderLines = (value as { orderLines?: unknown }).orderLines;
+  if (orderLines === undefined) {
+    return true;
+  }
+  return Array.isArray(orderLines) && orderLines.every((line) => {
+    if (typeof line !== "object" || line === null) {
+      return false;
+    }
+    const row = line as {
+      lineId?: unknown;
+      name?: unknown;
+      quantity?: unknown;
+      priceCents?: unknown;
+      lineType?: unknown;
+    };
+    return typeof row.lineId === "string"
+      && typeof row.name === "string"
+      && typeof row.quantity === "number"
+      && typeof row.priceCents === "string"
+      && (row.lineType === "PACK" || row.lineType === "MARKETPLACE_LISTING");
+  });
 }
 
 export async function submitCheckout(input: {
@@ -143,19 +179,23 @@ export async function submitCheckout(input: {
     throw new CheckoutUnknown();
   }
 
+  const purchasedPackIds = purchasedPackIdsFrom(payload.packs);
+  const sealedPackIds = await openableCardPackIds(purchasedPackIds);
+
   return {
     purchaseId: payload.purchaseId,
     cartId: payload.cartId,
     totalCents: centsFromWire(payload.totalCents),
     balanceCents: centsFromWire(payload.balanceCents),
     idempotencyKey: payload.idempotencyKey,
-    packCount: payload.packs.length,
+    packCount: purchasedPackIds.length,
     listingCount: Array.isArray(payload.listings) ? payload.listings.length : 0,
-    sealedPackIds: sealedPackIds(payload.packs),
+    sealedPackIds,
+    deliveredPackCount: purchasedPackIds.length - sealedPackIds.length,
   };
 }
 
-function sealedPackIds(packs: unknown[]): string[] {
+function purchasedPackIdsFrom(packs: unknown[]): string[] {
   const ids: string[] = [];
   for (const pack of packs) {
     if (typeof pack !== "object" || pack === null) {
@@ -167,6 +207,36 @@ function sealedPackIds(packs: unknown[]): string[] {
     }
   }
   return ids;
+}
+
+/** Trading-card packs that still need reveal. Sneaker/watch packs deliver at checkout. */
+async function openableCardPackIds(ids: string[]): Promise<string[]> {
+  if (ids.length === 0) {
+    return [];
+  }
+  const { data, error } = await supabase
+    .from("purchased_packs")
+    .select(`
+      id,
+      reveal_state,
+      pack_skus (
+        category
+      )
+    `)
+    .in("id", ids);
+
+  if (error || !data) {
+    return ids;
+  }
+
+  const openable: string[] = [];
+  for (const row of data) {
+    const sku = Array.isArray(row.pack_skus) ? row.pack_skus[0] : row.pack_skus;
+    if (sku?.category === "TRADING_CARD" && row.reveal_state !== "PACK_COMPLETE") {
+      openable.push(row.id);
+    }
+  }
+  return openable;
 }
 
 function isDomainError(value: unknown): value is { code: string; message: string } {

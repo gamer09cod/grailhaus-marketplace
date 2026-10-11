@@ -176,3 +176,16 @@ supabase/seed.sql          catalog, pack tiers, the Midnight Drop, reviewer wall
 supabase/tests/            SQL tests, each rolled back
 supabase/config.toml       local Supabase config
 ```
+
+
+## Catalog choices and original artwork
+
+The seed contains five evergreen pack types per category, plus the separate Midnight timed drop:
+
+- Cards: Starter, Scout, Collector, Elite, Legendary.
+- Sneakers: Street, Daily, Rare, Archive, Vault.
+- Watches: Entry Vault, Heritage, Luxury, Prestige, Grail.
+
+The additional tiers reuse validated existing odds and pools at higher prices. Existing tier prices, purchased contents, reservations and owned items are preserved. The migration `20261008130000_five_evergreen_tiers.sql` adds missing choices on an existing seeded database; clean databases receive them from `supabase/seed.sql`. Apply repository migrations to the linked hosted project before expecting the additional choices in a hosted build. No hosted database was modified during this change.
+
+Thirty original locally bundled images cover every seeded fictional card plus category packaging for all pack tiers. See `app/assets/catalog/README.md` for provenance and mapping. Bundle assets work offline; remote image URLs take precedence and fall back on failure. Run `npx tsx scripts/catalog-artwork.ts` to verify coverage and seeded economics. A new APK is required to distribute these bundled assets.

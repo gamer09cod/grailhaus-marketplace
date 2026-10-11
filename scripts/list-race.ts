@@ -14,11 +14,11 @@ async function main(): Promise<void> {
 
   try {
     const catalog = await admin.query<{ id: string }>(
-      "select id from public.catalog_items where name = 'Harbor Fox'",
+      "select id from public.catalog_items where name = 'Emberkin'",
     );
     const catalogId = catalog.rows[0]?.id;
     if (!catalogId) {
-      throw new Error("Harbor Fox is missing.");
+      throw new Error("Emberkin is missing.");
     }
 
     const inserted = await admin.query<{ id: string }>(

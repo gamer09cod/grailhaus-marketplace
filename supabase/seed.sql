@@ -22,87 +22,44 @@ end $$;
 insert into public.catalog_items (
   category, name, rarity, base_value_cents, current_value_cents
 ) values
-  ('TRADING_CARD', 'Harbor Fox', 'COMMON', 200, 200),
-  ('TRADING_CARD', 'Glass Minnow', 'COMMON', 250, 250),
-  ('TRADING_CARD', 'Paper Lantern', 'COMMON', 300, 300),
-  ('TRADING_CARD', 'Cedar Finch', 'COMMON', 350, 350),
-  ('TRADING_CARD', 'Copper Relay', 'UNCOMMON', 600, 600),
-  ('TRADING_CARD', 'Night Market', 'UNCOMMON', 800, 800),
-  ('TRADING_CARD', 'Velvet Rook', 'RARE', 1500, 1500),
-  ('TRADING_CARD', 'Silver Orchard', 'EPIC', 2500, 2500),
-  ('TRADING_CARD', 'Eclipse Wyrm', 'LEGENDARY', 8000, 8000),
-  ('TRADING_CARD', 'Marble Saint', 'COMMON', 1500, 1500),
-  ('TRADING_CARD', 'Red Circuit', 'COMMON', 1800, 1800),
-  ('TRADING_CARD', 'Hollow Choir', 'COMMON', 2000, 2000),
-  ('TRADING_CARD', 'Brass Compass', 'COMMON', 2200, 2200),
-  ('TRADING_CARD', 'Ivory Duelist', 'UNCOMMON', 4000, 4000),
-  ('TRADING_CARD', 'Storm Archive', 'UNCOMMON', 5000, 5000),
-  ('TRADING_CARD', 'Gilded Kraken', 'RARE', 9000, 9000),
-  ('TRADING_CARD', 'Obsidian Saint', 'EPIC', 18000, 18000),
-  ('TRADING_CARD', 'Crown of Cinders', 'LEGENDARY', 60000, 60000),
-  ('TRADING_CARD', 'Royal Courier', 'COMMON', 8000, 8000),
-  ('TRADING_CARD', 'Pale Astronomer', 'COMMON', 9000, 9000),
-  ('TRADING_CARD', 'Thorn Regent', 'COMMON', 10000, 10000),
-  ('TRADING_CARD', 'Mirror Bishop', 'COMMON', 11000, 11000),
-  ('TRADING_CARD', 'Sapphire Duel', 'UNCOMMON', 18000, 18000),
-  ('TRADING_CARD', 'Gold Reliquary', 'UNCOMMON', 22000, 22000),
-  ('TRADING_CARD', 'Eclipse Dragon', 'RARE', 40000, 40000),
+  ('TRADING_CARD', 'Emberkin', 'COMMON', 200, 200),
+  ('TRADING_CARD', 'Tide Minnow', 'COMMON', 250, 250),
+  ('TRADING_CARD', 'Glow Sprite', 'COMMON', 300, 300),
+  ('TRADING_CARD', 'Gust Finch', 'COMMON', 350, 350),
+  ('TRADING_CARD', 'Volt Mite', 'UNCOMMON', 600, 600),
+  ('TRADING_CARD', 'Shade Cub', 'UNCOMMON', 800, 800),
+  ('TRADING_CARD', 'Rookwing', 'RARE', 1500, 1500),
+  ('TRADING_CARD', 'Bloom Wyrmling', 'EPIC', 2500, 2500),
+  ('TRADING_CARD', 'Ember Drake', 'LEGENDARY', 8000, 8000),
+  ('TRADING_CARD', 'Stone Cub', 'COMMON', 1500, 1500),
+  ('TRADING_CARD', 'Spark Circuit', 'COMMON', 1800, 1800),
+  ('TRADING_CARD', 'Hollow Howl', 'COMMON', 2000, 2000),
+  ('TRADING_CARD', 'Brass Scout', 'COMMON', 2200, 2200),
+  ('TRADING_CARD', 'Ivory Fang', 'UNCOMMON', 4000, 4000),
+  ('TRADING_CARD', 'Storm Ledger', 'UNCOMMON', 5000, 5000),
+  ('TRADING_CARD', 'Tide Kraken', 'RARE', 9000, 9000),
+  ('TRADING_CARD', 'Nyxara', 'EPIC', 18000, 18000),
+  ('TRADING_CARD', 'Auric Crown', 'LEGENDARY', 60000, 60000),
+  ('TRADING_CARD', 'Royal Runner', 'COMMON', 8000, 8000),
+  ('TRADING_CARD', 'Pale Orbit', 'COMMON', 9000, 9000),
+  ('TRADING_CARD', 'Thorn Viper', 'COMMON', 10000, 10000),
+  ('TRADING_CARD', 'Mirror Scale', 'COMMON', 11000, 11000),
+  ('TRADING_CARD', 'Sapphire Clash', 'UNCOMMON', 18000, 18000),
+  ('TRADING_CARD', 'Gold Relic', 'UNCOMMON', 22000, 22000),
+  ('TRADING_CARD', 'Eclipse Sovereign', 'RARE', 40000, 40000),
   ('TRADING_CARD', 'Void Empress', 'EPIC', 80000, 80000),
-  ('TRADING_CARD', 'First Sovereign', 'LEGENDARY', 200000, 200000),
+  ('TRADING_CARD', 'Aurelith Drake', 'LEGENDARY', 200000, 200000),
+  -- Five original catalog entries per non-card category keep the trial focused.
   ('SNEAKER', 'Nike Dunk Low Panda', 'COMMON', 3500, 3500),
-  ('SNEAKER', 'Adidas Samba OG', 'COMMON', 4000, 4000),
-  ('SNEAKER', 'New Balance 550 White', 'COMMON', 4500, 4500),
-  ('SNEAKER', 'Nike Air Force 1', 'COMMON', 5000, 5000),
   ('SNEAKER', 'Jordan 1 Mid Chicago', 'UNCOMMON', 8000, 8000),
-  ('SNEAKER', 'Nike Dunk Low Jackie Robinson', 'UNCOMMON', 9000, 9000),
   ('SNEAKER', 'Jordan 4 Military Black', 'RARE', 15000, 15000),
   ('SNEAKER', 'Nike Dunk Low Travis Scott', 'EPIC', 22000, 22000),
   ('SNEAKER', 'Jordan 1 High Lost and Found', 'LEGENDARY', 40000, 40000),
-  ('SNEAKER', 'Nike Dunk Low Polar Blue', 'COMMON', 8000, 8000),
-  ('SNEAKER', 'New Balance 2002R Protection Pack', 'COMMON', 9000, 9000),
-  ('SNEAKER', 'Adidas Forum Low', 'COMMON', 10000, 10000),
-  ('SNEAKER', 'Jordan 3 White Cement', 'COMMON', 12000, 12000),
-  ('SNEAKER', 'Nike SB Dunk Low StrangeLove', 'UNCOMMON', 18000, 18000),
-  ('SNEAKER', 'Jordan 4 Bred Reimagined', 'UNCOMMON', 22000, 22000),
-  ('SNEAKER', 'Nike Dunk Low Ben and Jerrys', 'RARE', 40000, 40000),
-  ('SNEAKER', 'Jordan 1 High Travis Scott', 'EPIC', 80000, 80000),
-  ('SNEAKER', 'Nike SB Dunk Low Staple Pigeon', 'LEGENDARY', 150000, 150000),
-  ('SNEAKER', 'Jordan 4 Union Guava', 'COMMON', 20000, 20000),
-  ('SNEAKER', 'Nike Dunk Low Off-White Lot 1', 'COMMON', 25000, 25000),
-  ('SNEAKER', 'Adidas Yeezy Boost 350 Beluga', 'COMMON', 28000, 28000),
-  ('SNEAKER', 'Jordan 1 High Fragment', 'COMMON', 30000, 30000),
-  ('SNEAKER', 'Nike Dunk Low Off-White University Red', 'UNCOMMON', 45000, 45000),
-  ('SNEAKER', 'Jordan 4 Off-White Sail', 'UNCOMMON', 55000, 55000),
-  ('SNEAKER', 'Jordan 11 Concord', 'RARE', 90000, 90000),
-  ('SNEAKER', 'Nike Dunk Low Off-White Michigan', 'EPIC', 140000, 140000),
-  ('SNEAKER', 'Jordan 1 High Off-White Chicago', 'LEGENDARY', 250000, 250000),
   ('WATCH', 'Casio G-Shock GA2100', 'COMMON', 8000, 8000),
-  ('WATCH', 'Seiko 5 Sports SRPD', 'COMMON', 10000, 10000),
-  ('WATCH', 'Citizen Tsuyosa', 'COMMON', 12000, 12000),
-  ('WATCH', 'Orient Bambino', 'COMMON', 15000, 15000),
   ('WATCH', 'Seiko Alpinist SPB121', 'UNCOMMON', 25000, 25000),
-  ('WATCH', 'Tissot PRX Quartz', 'UNCOMMON', 35000, 35000),
   ('WATCH', 'Hamilton Khaki Field', 'RARE', 45000, 45000),
   ('WATCH', 'Tissot PRX Powermatic 80', 'EPIC', 80000, 80000),
-  ('WATCH', 'Longines HydroConquest', 'LEGENDARY', 150000, 150000),
-  ('WATCH', 'Tissot Gentleman', 'COMMON', 40000, 40000),
-  ('WATCH', 'Hamilton Jazzmaster', 'COMMON', 60000, 60000),
-  ('WATCH', 'Mido Commander', 'COMMON', 80000, 80000),
-  ('WATCH', 'Longines Conquest', 'COMMON', 100000, 100000),
-  ('WATCH', 'Longines Spirit', 'UNCOMMON', 150000, 150000),
-  ('WATCH', 'Tudor Black Bay 36', 'UNCOMMON', 180000, 180000),
-  ('WATCH', 'Tudor Black Bay 58', 'RARE', 350000, 350000),
-  ('WATCH', 'Omega Speedmaster Moonwatch', 'EPIC', 600000, 600000),
-  ('WATCH', 'Rolex Explorer 124270', 'LEGENDARY', 1200000, 1200000),
-  ('WATCH', 'Omega Seamaster 300', 'COMMON', 220000, 220000),
-  ('WATCH', 'Tudor Pelagos 39', 'COMMON', 250000, 250000),
-  ('WATCH', 'Longines Spirit Zulu Time', 'COMMON', 280000, 280000),
-  ('WATCH', 'Omega Aqua Terra', 'COMMON', 320000, 320000),
-  ('WATCH', 'Omega Speedmaster Reduced', 'UNCOMMON', 450000, 450000),
-  ('WATCH', 'Rolex Oyster Perpetual 41', 'UNCOMMON', 550000, 550000),
-  ('WATCH', 'Rolex Explorer II 226570', 'RARE', 900000, 900000),
-  ('WATCH', 'Rolex Submariner 124060', 'EPIC', 1400000, 1400000),
-  ('WATCH', 'Rolex GMT-Master II 126710', 'LEGENDARY', 2500000, 2500000);
+  ('WATCH', 'Longines HydroConquest', 'LEGENDARY', 150000, 150000);
 
 insert into public.pack_skus (
   category, name, tier, price_cents, stock_total, stock_on_hand, stock_reserved, is_drop, active
@@ -116,6 +73,12 @@ insert into public.pack_skus (
   ('WATCH', 'Entry Vault', 'Entry Vault', 50000, 500, 500, 0, false, true),
   ('WATCH', 'Luxury Box', 'Luxury', 200000, 500, 500, 0, false, true),
   ('WATCH', 'Grail Box', 'Grail', 800000, 500, 500, 0, false, true),
+  ('TRADING_CARD', 'Scout Pack', 'Scout', 2500, 500, 500, 0, false, true),
+  ('TRADING_CARD', 'Elite Pack', 'Elite', 25000, 500, 500, 0, false, true),
+  ('SNEAKER', 'Daily Pack', 'Daily', 12000, 500, 500, 0, false, true),
+  ('SNEAKER', 'Archive Pack', 'Archive', 50000, 500, 500, 0, false, true),
+  ('WATCH', 'Heritage Box', 'Heritage', 100000, 500, 500, 0, false, true),
+  ('WATCH', 'Prestige Box', 'Prestige', 400000, 500, 500, 0, false, true),
   ('TRADING_CARD', 'Midnight Drop', 'Midnight', 2500, 40, 40, 0, true, true);
 
 -- Odds and pools commit together. The coverage trigger is deferred, so a
@@ -123,16 +86,23 @@ insert into public.pack_skus (
 do $$
 declare
   tier_names text[][] := array[
-    array['TRADING_CARD', 'Starter', 'Harbor Fox', 'Glass Minnow', 'Paper Lantern', 'Cedar Finch', 'Copper Relay', 'Night Market', 'Velvet Rook', 'Silver Orchard', 'Eclipse Wyrm'],
-    array['TRADING_CARD', 'Collector', 'Marble Saint', 'Red Circuit', 'Hollow Choir', 'Brass Compass', 'Ivory Duelist', 'Storm Archive', 'Gilded Kraken', 'Obsidian Saint', 'Crown of Cinders'],
-    array['TRADING_CARD', 'Legendary', 'Royal Courier', 'Pale Astronomer', 'Thorn Regent', 'Mirror Bishop', 'Sapphire Duel', 'Gold Reliquary', 'Eclipse Dragon', 'Void Empress', 'First Sovereign'],
-    array['TRADING_CARD', 'Midnight', 'Harbor Fox', 'Glass Minnow', 'Paper Lantern', 'Cedar Finch', 'Copper Relay', 'Night Market', 'Velvet Rook', 'Silver Orchard', 'Eclipse Wyrm'],
-    array['SNEAKER', 'Street', 'Nike Dunk Low Panda', 'Adidas Samba OG', 'New Balance 550 White', 'Nike Air Force 1', 'Jordan 1 Mid Chicago', 'Nike Dunk Low Jackie Robinson', 'Jordan 4 Military Black', 'Nike Dunk Low Travis Scott', 'Jordan 1 High Lost and Found'],
-    array['SNEAKER', 'Rare', 'Nike Dunk Low Polar Blue', 'New Balance 2002R Protection Pack', 'Adidas Forum Low', 'Jordan 3 White Cement', 'Nike SB Dunk Low StrangeLove', 'Jordan 4 Bred Reimagined', 'Nike Dunk Low Ben and Jerrys', 'Jordan 1 High Travis Scott', 'Nike SB Dunk Low Staple Pigeon'],
-    array['SNEAKER', 'Vault', 'Jordan 4 Union Guava', 'Nike Dunk Low Off-White Lot 1', 'Adidas Yeezy Boost 350 Beluga', 'Jordan 1 High Fragment', 'Nike Dunk Low Off-White University Red', 'Jordan 4 Off-White Sail', 'Jordan 11 Concord', 'Nike Dunk Low Off-White Michigan', 'Jordan 1 High Off-White Chicago'],
-    array['WATCH', 'Entry Vault', 'Casio G-Shock GA2100', 'Seiko 5 Sports SRPD', 'Citizen Tsuyosa', 'Orient Bambino', 'Seiko Alpinist SPB121', 'Tissot PRX Quartz', 'Hamilton Khaki Field', 'Tissot PRX Powermatic 80', 'Longines HydroConquest'],
-    array['WATCH', 'Luxury', 'Tissot Gentleman', 'Hamilton Jazzmaster', 'Mido Commander', 'Longines Conquest', 'Longines Spirit', 'Tudor Black Bay 36', 'Tudor Black Bay 58', 'Omega Speedmaster Moonwatch', 'Rolex Explorer 124270'],
-    array['WATCH', 'Grail', 'Omega Seamaster 300', 'Tudor Pelagos 39', 'Longines Spirit Zulu Time', 'Omega Aqua Terra', 'Omega Speedmaster Reduced', 'Rolex Oyster Perpetual 41', 'Rolex Explorer II 226570', 'Rolex Submariner 124060', 'Rolex GMT-Master II 126710']
+    array['TRADING_CARD', 'Starter', 'Emberkin', 'Tide Minnow', 'Glow Sprite', 'Gust Finch', 'Volt Mite', 'Shade Cub', 'Rookwing', 'Bloom Wyrmling', 'Ember Drake'],
+    array['TRADING_CARD', 'Scout', 'Emberkin', 'Tide Minnow', 'Glow Sprite', 'Gust Finch', 'Volt Mite', 'Shade Cub', 'Rookwing', 'Bloom Wyrmling', 'Ember Drake'],
+    array['TRADING_CARD', 'Collector', 'Stone Cub', 'Spark Circuit', 'Hollow Howl', 'Brass Scout', 'Ivory Fang', 'Storm Ledger', 'Tide Kraken', 'Nyxara', 'Auric Crown'],
+    array['TRADING_CARD', 'Elite', 'Stone Cub', 'Spark Circuit', 'Hollow Howl', 'Brass Scout', 'Ivory Fang', 'Storm Ledger', 'Tide Kraken', 'Nyxara', 'Auric Crown'],
+    array['TRADING_CARD', 'Legendary', 'Royal Runner', 'Pale Orbit', 'Thorn Viper', 'Mirror Scale', 'Sapphire Clash', 'Gold Relic', 'Eclipse Sovereign', 'Void Empress', 'Aurelith Drake'],
+    array['TRADING_CARD', 'Midnight', 'Emberkin', 'Tide Minnow', 'Glow Sprite', 'Gust Finch', 'Volt Mite', 'Shade Cub', 'Rookwing', 'Bloom Wyrmling', 'Ember Drake'],
+    -- Pad to 11 slots so Postgres accepts a rectangular text[][] (cards use 9 pool items).
+    array['SNEAKER', 'Street', 'Nike Dunk Low Panda', 'Jordan 1 Mid Chicago', 'Jordan 4 Military Black', 'Nike Dunk Low Travis Scott', 'Jordan 1 High Lost and Found', '', '', '', ''],
+    array['SNEAKER', 'Daily', 'Nike Dunk Low Panda', 'Jordan 1 Mid Chicago', 'Jordan 4 Military Black', 'Nike Dunk Low Travis Scott', 'Jordan 1 High Lost and Found', '', '', '', ''],
+    array['SNEAKER', 'Rare', 'Nike Dunk Low Panda', 'Jordan 1 Mid Chicago', 'Jordan 4 Military Black', 'Nike Dunk Low Travis Scott', 'Jordan 1 High Lost and Found', '', '', '', ''],
+    array['SNEAKER', 'Archive', 'Nike Dunk Low Panda', 'Jordan 1 Mid Chicago', 'Jordan 4 Military Black', 'Nike Dunk Low Travis Scott', 'Jordan 1 High Lost and Found', '', '', '', ''],
+    array['SNEAKER', 'Vault', 'Nike Dunk Low Panda', 'Jordan 1 Mid Chicago', 'Jordan 4 Military Black', 'Nike Dunk Low Travis Scott', 'Jordan 1 High Lost and Found', '', '', '', ''],
+    array['WATCH', 'Entry Vault', 'Casio G-Shock GA2100', 'Seiko Alpinist SPB121', 'Hamilton Khaki Field', 'Tissot PRX Powermatic 80', 'Longines HydroConquest', '', '', '', ''],
+    array['WATCH', 'Heritage', 'Casio G-Shock GA2100', 'Seiko Alpinist SPB121', 'Hamilton Khaki Field', 'Tissot PRX Powermatic 80', 'Longines HydroConquest', '', '', '', ''],
+    array['WATCH', 'Luxury', 'Casio G-Shock GA2100', 'Seiko Alpinist SPB121', 'Hamilton Khaki Field', 'Tissot PRX Powermatic 80', 'Longines HydroConquest', '', '', '', ''],
+    array['WATCH', 'Prestige', 'Casio G-Shock GA2100', 'Seiko Alpinist SPB121', 'Hamilton Khaki Field', 'Tissot PRX Powermatic 80', 'Longines HydroConquest', '', '', '', ''],
+    array['WATCH', 'Grail', 'Casio G-Shock GA2100', 'Seiko Alpinist SPB121', 'Hamilton Khaki Field', 'Tissot PRX Powermatic 80', 'Longines HydroConquest', '', '', '', '']
   ];
   tier_row text[];
   sku_id uuid;
@@ -155,9 +125,9 @@ begin
       raise exception 'missing pack sku % %', tier_row[1], tier_row[2];
     end if;
 
-    if tier_row[2] in ('Starter', 'Street', 'Entry Vault', 'Midnight') then
+    if tier_row[2] in ('Starter', 'Street', 'Entry Vault', 'Midnight', 'Scout', 'Daily', 'Heritage') then
       chosen := low_odds;
-    elsif tier_row[2] in ('Collector', 'Rare', 'Luxury') then
+    elsif tier_row[2] in ('Collector', 'Rare', 'Luxury', 'Elite', 'Archive', 'Prestige') then
       chosen := mid_odds;
     else
       chosen := high_odds;
@@ -169,6 +139,10 @@ begin
     end loop;
 
     for item_name in select unnest(tier_row[3:11]) loop
+      if item_name is null or btrim(item_name) = '' then
+        continue;
+      end if;
+
       insert into public.pack_sku_items (pack_sku_id, catalog_item_id)
       select sku_id, item.id
       from public.catalog_items item
@@ -234,11 +208,16 @@ begin
     where category = category_name
       and is_drop = false;
 
-    if item_count < 20 or item_count > 30 then
+    if category_name = 'TRADING_CARD' then
+      if item_count < 20 or item_count > 30 then
+        raise exception 'seed catalog count for % is %', category_name, item_count;
+      end if;
+    elsif item_count <> 5 then
+      -- Compact sneaker/watch catalog: five illustrated products each.
       raise exception 'seed catalog count for % is %', category_name, item_count;
     end if;
 
-    if tier_count <> 3 then
+    if tier_count <> 5 then
       raise exception 'seed tier count for % is %', category_name, tier_count;
     end if;
   end loop;

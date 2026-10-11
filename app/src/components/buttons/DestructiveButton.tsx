@@ -3,7 +3,7 @@ import { BaseButton, type ButtonAppearance, type ButtonProps } from "./BaseButto
 
 const soft: ButtonAppearance = {
   background: colors.status.error.muted,
-  backgroundPressed: "rgba(242, 109, 109, 0.20)",
+  backgroundPressed: colors.status.error.border,
   border: colors.status.error.border,
   text: colors.status.error.solid,
 };
@@ -11,7 +11,7 @@ const soft: ButtonAppearance = {
 // Dark text on the red fill is about 6.8:1.
 const solid: ButtonAppearance = {
   background: colors.status.error.solid,
-  backgroundPressed: "#D95A5A",
+  backgroundPressed: colors.status.error.fillPressed,
   border: colors.status.error.solid,
   text: colors.backgroundPrimary,
 };

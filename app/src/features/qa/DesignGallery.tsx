@@ -15,13 +15,20 @@ import { CartLineSkeleton, PackCardSkeleton, SkeletonBone } from "../../componen
 import { categoryLabel } from "../shelf/packs";
 import { useConnectivity } from "../shelf/useOnline";
 import {
+  buttonSize,
+  catalogSourcePx,
   colors,
   duration,
+  iconSize,
+  imageAspect,
+  layout,
   motionProfile,
   press,
   radius,
+  revealCardFrame,
   revealMotion,
   spacing,
+  touchTarget,
   typography,
   type Tone,
   type TypographyVariant,
@@ -30,7 +37,7 @@ import {
 const typeSamples: { variant: TypographyVariant; sample: string }[] = [
   { variant: "displayXL", sample: "$18,420.50" },
   { variant: "display", sample: "Midnight Grail Drop" },
-  { variant: "titleLarge", sample: "Review Purchase" },
+  { variant: "titleLarge", sample: "Your cart" },
   { variant: "title", sample: "Legendary Watch Vault" },
   { variant: "heading", sample: "What's inside" },
   { variant: "body", sample: "20 premium watch packs." },
@@ -57,7 +64,7 @@ export function DesignGallery() {
     <View style={styles.panel}>
       <Text style={[typography.titleLarge, styles.primaryText]}>Design system</Text>
       <Text style={[typography.bodySmall, styles.secondaryText]}>
-        Phase 1 tokens and buttons. Screens adopt them in later phases.
+        Premium tokens: dark Cobalt surfaces, reserved gold, image aspects, and shared control sizes. Screens adopt layout changes in later phases.
       </Text>
 
       <Section title="Surfaces">
@@ -70,6 +77,19 @@ export function DesignGallery() {
             ["surfaceElevated", colors.surfaceElevated],
           ]}
         />
+      </Section>
+
+      <Section title="Premium gold (rare use)">
+        <Text style={[typography.bodySmall, styles.secondaryText]}>
+          Use for legendary rarity and reveal highlights only — never for routine CTAs or nav.
+        </Text>
+        <Swatches
+          items={[
+            ["premium.gold", colors.premium.gold],
+            ["premium.goldMuted", colors.premium.goldMuted],
+          ]}
+        />
+        <Badge label="Legendary" tone={colors.rarity.LEGENDARY} />
       </Section>
 
       <Section title="Text">
@@ -115,6 +135,31 @@ export function DesignGallery() {
         ))}
       </Section>
 
+      <Section title="Spacing and radius">
+        <Text style={[typography.bodySmall, styles.secondaryText]}>
+          screenPadding {layout.screenPadding} · sectionGap {layout.sectionGap} · minTouch {touchTarget.min}
+        </Text>
+        <Text style={[typography.bodySmall, styles.primaryText]}>
+          spacing sm {spacing.sm} / base {spacing.base} / lg {spacing.lg} · radius button {radius.button} / card {radius.card} / modal {radius.modal}
+        </Text>
+      </Section>
+
+      <Section title="Image aspects">
+        <Text style={[typography.bodySmall, styles.secondaryText]}>
+          productPortrait {imageAspect.productPortrait} · holdingPortrait {imageAspect.holdingPortrait} · tradingCard{" "}
+          {imageAspect.tradingCard.toFixed(3)} · packSleeve {imageAspect.packSleeve} · hero {imageAspect.hero}
+        </Text>
+        <Text style={[typography.bodySmall, styles.primaryText]}>
+          reveal frame {revealCardFrame.width}×{revealCardFrame.height} · sneaker/watch source {catalogSourcePx.productSquare}² JPEG
+        </Text>
+      </Section>
+
+      <Section title="Control sizes">
+        <Text style={[typography.bodySmall, styles.primaryText]}>
+          buttons sm {buttonSize.sm.minHeight} / md {buttonSize.md.minHeight} / lg {buttonSize.lg.minHeight} · icons sm {iconSize.sm} / md {iconSize.md} / lg {iconSize.lg}
+        </Text>
+      </Section>
+
       <Section title="Buttons">
         <View style={styles.buttonRow}>
           <PrimaryButton label="Enter Drop" onPress={() => undefined} />
@@ -148,7 +193,7 @@ export function DesignGallery() {
         </View>
         <PrimaryButton
           fullWidth
-          label="Confirm Purchase · $820.00"
+          label="Pay $820.00"
           loading={confirming}
           loadingLabel="Confirming purchase…"
           motion="financial"
@@ -267,13 +312,13 @@ export function DesignGallery() {
 
       <Section title="Performance">
         <Text style={[typography.bodySmall, styles.secondaryText]}>
-          Market, Portfolio, and Packs use FlatList with windowing. Pack / market / holding cards are memoized with stable onOpen handlers. DropCountdown keeps 1s ticks local. Home rails stay short ScrollViews (no nested VirtualizedList). FlashList and expo-image not added — no images seeded yet.
+          Market, Collection, and Packs use FlatList with windowing. Pack / market / holding cards are memoized with stable onOpen handlers. DropCountdown keeps 1s ticks local. Home rails stay short ScrollViews. FlashList and expo-image stay deferred until measured need.
         </Text>
       </Section>
 
       <Section title="Final audit">
         <Text style={[typography.bodySmall, styles.secondaryText]}>
-          Primary screens share screen padding 16, section gap 24, button radius 12, card radius 16, and cobalt accent. Loading → skeletons; empty → EmptyState; errors → ErrorState; offline → ConnectivityBanner; money surfaces stay calmer. QA and Admin use the same tokens — no leftover gold chrome.
+          Obsidian Luxury tokens: near-black surfaces, lavender interactive accents, champagne gold for Grail/legendary only. Manrope typography. Packs/Market use a two-column portrait grid. Loading → skeletons; empty → EmptyState; errors → ErrorState; offline → ConnectivityBanner.
         </Text>
         <PrimaryButton label="Primary" onPress={() => undefined} />
         <SecondaryButton label="Secondary" onPress={() => undefined} />

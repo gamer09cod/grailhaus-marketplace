@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useFocusEffect, useNavigation, useRoute } from "@react-navigation/native";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import type { RouteProp } from "@react-navigation/native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Crypto from "expo-crypto";
-import { AppState, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
+import { AppState, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import {
@@ -31,37 +30,34 @@ import { InlineStatusCard } from "../../components/InlineStatusCard";
 import { RecoveryAction } from "../../components/RecoveryAction";
 import { CartLineSkeleton } from "../../components/Skeleton";
 import { PrimaryButton } from "../../components/buttons";
-import type { IconName } from "../../components/Icon";
+import { Icon, type IconName } from "../../components/Icon";
 import type { StatusKey } from "../../theme";
 import type { AppStackParamList } from "../../navigation/types";
-import { colors, layout, spacing, typography } from "../../theme";
+import { colors, layout, maxFontScale, radius, spacing, typography } from "../../theme";
 import { centsFromWire, formatCents } from "../../utils/money";
 import { useOnline } from "../shelf/useOnline";
 import { useWalletBalance } from "../wallet/useWalletBalance";
 import { CartLineItem } from "./CartLineItem";
 import { CartSummary } from "./CartSummary";
-import { ReviewPurchaseView } from "./ReviewPurchaseView";
 import { cartBreakdown, payableTotal } from "./cartTotals";
 import { holdHasEnded } from "./countdown";
-import { captureReview, reviewChanges, reviewFromPayment, type ReviewSnapshot } from "./reviewSnapshot";
+import { buildOrderSummary, captureOrderLines, type OrderSummaryLine } from "./orderSummary";
+import { capturePayment } from "./paymentSnapshot";
 
 export function CartScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<AppStackParamList>>();
-  const route = useRoute<RouteProp<AppStackParamList, "Cart">>();
   const queryClient = useQueryClient();
   const insets = useSafeAreaInsets();
   const online = useOnline();
   const wallet = useWalletBalance();
   const [notice, setNotice] = useState<string | null>(null);
-  const [openPackIds, setOpenPackIds] = useState<string[]>([]);
   const [pendingLineId, setPendingLineId] = useState<string | null>(null);
   const [awaitingResult, setAwaitingResult] = useState(false);
   const [paying, setPaying] = useState(false);
   const [awaitingPayment, setAwaitingPayment] = useState(false);
-  const [reviewing, setReviewing] = useState(false);
-  const [reviewed, setReviewed] = useState<ReviewSnapshot | null>(null);
   const inflight = useRef<LineCartAction | null>(null);
   const payment = useRef<PaymentRequest | null>(null);
+  const orderLines = useRef<OrderSummaryLine[] | null>(null);
   const payingLock = useRef(false);
   const resumedPayment = useRef(false);
   const cart = useQuery({
@@ -79,12 +75,6 @@ export function CartScreen() {
       refreshCart();
     }, [refreshCart]),
   );
-
-  useEffect(() => {
-    if (reviewing && route.params?.startReview) {
-      navigation.setParams({ startReview: false });
-    }
-  }, [navigation, reviewing, route.params?.startReview]);
 
   useEffect(() => {
     const appState = AppState.addEventListener("change", (next) => {
@@ -172,7 +162,6 @@ export function CartScreen() {
       await rememberInflightCheckout(storedPayment(request));
     }
     setPaying(true);
-    setReviewing(true);
     setNotice("Confirming purchase…");
     try {
       const receipt = await submitCheckout(request);
@@ -180,21 +169,20 @@ export function CartScreen() {
       payingLock.current = false;
       setAwaitingPayment(false);
       await clearInflightCheckout();
-      const parts: string[] = [];
-      if (receipt.packCount > 0) {
-        parts.push(receipt.packCount === 1 ? "1 pack is sealed." : `${receipt.packCount} packs are sealed.`);
-      }
-      if (receipt.listingCount > 0) {
-        parts.push(receipt.listingCount === 1 ? "1 listing is now yours." : `${receipt.listingCount} listings are now yours.`);
-      }
-      setNotice(`Paid ${formatCents(receipt.totalCents)}.\nBalance ${formatCents(receipt.balanceCents)}.${parts.length ? `\n${parts.join(" ")}` : ""}`);
-      setOpenPackIds(receipt.sealedPackIds);
+      const summary = buildOrderSummary(
+        receipt,
+        orderLines.current ?? fallbackOrderLines(request),
+        cart.data?.lines,
+      );
+      orderLines.current = null;
+      setNotice(null);
       void queryClient.invalidateQueries({ queryKey: ["cart"] });
       void queryClient.invalidateQueries({ queryKey: ["wallet"] });
       void queryClient.invalidateQueries({ queryKey: ["shelf-packs"] });
       void queryClient.invalidateQueries({ queryKey: ["market"] });
       void queryClient.invalidateQueries({ queryKey: ["holdings"] });
       void queryClient.invalidateQueries({ queryKey: ["sealed-packs"] });
+      navigation.replace("OrderSummary", summary);
     } catch (error) {
       if (error instanceof CheckoutUnknown) {
         setAwaitingPayment(true);
@@ -202,9 +190,9 @@ export function CartScreen() {
         return;
       }
       payment.current = null;
+      orderLines.current = null;
       payingLock.current = false;
       setAwaitingPayment(false);
-      setOpenPackIds([]);
       await clearInflightCheckout();
       setNotice(checkoutNotice(error));
       void queryClient.invalidateQueries({ queryKey: ["cart"] });
@@ -215,42 +203,29 @@ export function CartScreen() {
   }
 
   function startPayment() {
-    if (!online || payingLock.current || !reviewed) {
+    if (!online || payingLock.current) {
       return;
     }
     const snapshot = cart.data;
-    if (!snapshot?.cartId || reviewChanges(reviewed, snapshot.lines).length > 0) {
+    const captured = snapshot ? capturePayment(snapshot.lines) : null;
+    if (!snapshot?.cartId || !captured) {
       return;
     }
     payingLock.current = true;
+    const capturedLines = captureOrderLines(snapshot.lines);
+    orderLines.current = capturedLines;
     const request = payment.current ?? {
       cartId: snapshot.cartId,
       idempotencyKey: Crypto.randomUUID(),
-      expectedTotalCents: reviewed.totalCents,
-      lines: reviewed.lines.map((line) => ({
+      expectedTotalCents: captured.totalCents,
+      lines: captured.lines.map((line) => ({
         lineId: line.lineId,
         quantity: line.quantity,
         snapshotPriceCents: line.priceCents,
       })),
+      orderLines: capturedLines,
     };
     void runPayment(request, payment.current === null);
-  }
-
-  function enterReview() {
-    const captured = cart.data ? captureReview(cart.data.lines) : null;
-    if (!captured) {
-      return;
-    }
-    setReviewed(captured);
-    setReviewing(true);
-  }
-
-  function leaveReview() {
-    if (paying || awaitingPayment) {
-      return;
-    }
-    setReviewing(false);
-    setReviewed(null);
   }
 
   useEffect(() => {
@@ -271,12 +246,12 @@ export function CartScreen() {
           quantity: line.quantity,
           snapshotPriceCents: centsFromWire(line.snapshotPriceCents),
         })),
+        orderLines: saved.orderLines,
       };
       payment.current = request;
+      orderLines.current = saved.orderLines ?? null;
       payingLock.current = true;
       setAwaitingPayment(true);
-      setReviewing(true);
-      setReviewed(cart.data ? captureReview(cart.data.lines) ?? reviewFromPayment(request, cart.data.lines) : reviewFromPayment(request, []));
       setNotice("Confirming purchase…\n\nYour order may have completed.\nWe're checking before retrying.");
       void runPayment(request, false);
     });
@@ -285,32 +260,18 @@ export function CartScreen() {
   }, [online]);
 
   const snapshot = cart.data;
-  const wantsReview = route.params?.startReview === true;
-  if (wantsReview && snapshot && !reviewing && !paying && !awaitingPayment) {
-    const captured = captureReview(snapshot.lines);
-    if (captured) {
-      setReviewed(captured);
-      setReviewing(true);
-    }
-  }
   const lines = snapshot?.lines ?? [];
   const breakdown = cartBreakdown(lines);
   const liveTotal = payableTotal(lines);
-  const reviewedTotal = reviewed?.totalCents ?? liveTotal;
   const balance = wallet.data;
-  const after = balance !== undefined && reviewedTotal !== null ? balance - reviewedTotal : null;
+  const after = balance !== undefined && liveTotal !== null ? balance - liveTotal : null;
   const short = after !== null && after < 0n;
-  const changes = reviewed ? reviewChanges(reviewed, lines) : [];
-  const canEnterReview = online && liveTotal !== null && !paying && pendingLineId === null && !awaitingPayment && !short;
-  const canConfirm = online && reviewed !== null && changes.length === 0 && !paying && !awaitingPayment && !short;
+  const canPay = online && liveTotal !== null && !paying && pendingLineId === null && !awaitingPayment && !short;
   const cartBusy = !online || pendingLineId !== null || paying || awaitingPayment;
 
   return (
     <View style={styles.screen}>
-      <AppHeader
-        back={reviewing ? leaveReview : true}
-        title={reviewing ? "Review Purchase" : "Cart"}
-      />
+      <AppHeader back title="Cart" />
       <ScrollView
         contentContainerStyle={styles.content}
         refreshControl={
@@ -332,7 +293,7 @@ export function CartScreen() {
             onRetry={() => void cart.refetch()}
           />
         ) : null}
-        {snapshot && snapshot.lines.length === 0 && openPackIds.length === 0 ? (
+        {snapshot && snapshot.lines.length === 0 ? (
           <EmptyState
             body="Browse the shelf or the market."
             icon="cart-outline"
@@ -371,55 +332,52 @@ export function CartScreen() {
             tone={noticeTone(notice, awaitingResult)}
           />
         ) : null}
-        {openPackIds.length > 0 ? (
-          <PrimaryButton
-            label={openPackIds.length === 1 ? "Open pack" : `Open ${openPackIds.length} packs`}
-            motion="financial"
-            onPress={() => navigation.navigate("Reveal", { purchasedPackIds: openPackIds })}
-          />
+        {snapshot && snapshot.lines.length > 0 ? (
+          <View style={styles.itemsCard}>
+            <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.itemsHeading}>
+              {snapshot.lines.length === 1 ? "1 item" : `${snapshot.lines.length} items`}
+            </Text>
+            {snapshot.lines.map((line, index) => (
+              <CartLineItem
+                key={line.lineId}
+                busy={pendingLineId === line.lineId}
+                disabled={cartBusy}
+                line={line}
+                showDivider={index > 0}
+                snapshot={snapshot}
+                onAccept={() => startLineAction(line, line.lineType === "PACK" ? "acceptPrice" : "acceptListingPrice")}
+                onBrowseMarket={() => navigation.navigate("Tabs", { screen: "Market" })}
+                onRemove={() => startLineAction(line, "release")}
+                onRetry={() => startLineAction(line, "retry")}
+              />
+            ))}
+            <Pressable
+              accessibilityLabel="Add more items"
+              accessibilityRole="button"
+              style={({ pressed }) => [styles.addMore, pressed ? styles.addMorePressed : null]}
+              onPress={() => navigation.navigate("Tabs", { screen: "Packs" })}
+            >
+              <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.addMoreHint}>
+                Forgot something?
+              </Text>
+              <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.addMoreLink}>
+                Add more items
+              </Text>
+            </Pressable>
+          </View>
         ) : null}
-        {reviewing && reviewed ? (
-          <ReviewPurchaseView
+        {lines.length > 0 ? (
+          <CartSummary
             after={after}
             balance={balance}
-            changes={changes}
-            reviewed={reviewed}
+            marketCents={breakdown.marketCents}
+            packCents={breakdown.packCents}
             short={short}
-            onReviewCart={leaveReview}
+            totalCents={breakdown.totalCents}
           />
-        ) : (
-          <>
-            {snapshot ? (
-              <View style={styles.list}>
-                {snapshot.lines.map((line) => (
-                  <CartLineItem
-                    key={line.lineId}
-                    busy={pendingLineId === line.lineId}
-                    disabled={cartBusy}
-                    line={line}
-                    snapshot={snapshot}
-                    onAccept={() => startLineAction(line, line.lineType === "PACK" ? "acceptPrice" : "acceptListingPrice")}
-                    onBrowseMarket={() => navigation.navigate("Tabs", { screen: "Market" })}
-                    onRemove={() => startLineAction(line, "release")}
-                    onRetry={() => startLineAction(line, "retry")}
-                  />
-                ))}
-              </View>
-            ) : null}
-            {lines.length > 0 ? (
-              <CartSummary
-                after={after}
-                balance={balance}
-                marketCents={breakdown.marketCents}
-                packCents={breakdown.packCents}
-                short={short}
-                totalCents={breakdown.totalCents}
-              />
-            ) : null}
-          </>
-        )}
+        ) : null}
       </ScrollView>
-      {lines.length > 0 && openPackIds.length === 0 ? (
+      {lines.length > 0 ? (
         <View style={[styles.ctaBar, { paddingBottom: Math.max(insets.bottom, spacing.sm) }]}>
           {awaitingPayment ? (
             <RecoveryAction
@@ -434,24 +392,29 @@ export function CartScreen() {
                 }
               }}
             />
-          ) : reviewing ? (
-            <PrimaryButton
-              disabled={!canConfirm}
-              fullWidth
-              label={`Confirm Purchase · ${formatCents(reviewed?.totalCents ?? 0n)}`}
-              loading={paying}
-              loadingLabel="Confirming purchase…"
-              motion="financial"
-              onPress={startPayment}
-            />
           ) : (
-            <PrimaryButton
-              disabled={!canEnterReview}
-              fullWidth
-              label="Review Purchase"
-              motion="financial"
-              onPress={enterReview}
-            />
+            <View style={styles.payRow}>
+              <View style={styles.payMeta}>
+                <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.payVia}>
+                  From wallet
+                </Text>
+                <View style={styles.payTotalRow}>
+                  <Icon color={colors.textPrimary} name="wallet-outline" size={16} />
+                  <Text maxFontSizeMultiplier={maxFontScale.display} style={styles.payTotal}>
+                    {formatCents(liveTotal ?? breakdown.totalCents)}
+                  </Text>
+                </View>
+              </View>
+              <PrimaryButton
+                disabled={!canPay}
+                label={liveTotal !== null ? `Pay ${formatCents(liveTotal)}` : "Pay"}
+                loading={paying}
+                loadingLabel="Confirming…"
+                motion="financial"
+                style={styles.payButton}
+                onPress={startPayment}
+              />
+            </View>
           )}
         </View>
       ) : null}
@@ -470,6 +433,7 @@ type PaymentRequest = {
   idempotencyKey: string;
   expectedTotalCents: bigint;
   lines: { lineId: string; quantity: number; snapshotPriceCents: bigint }[];
+  orderLines?: OrderSummaryLine[];
 };
 
 function storedPayment(request: PaymentRequest): {
@@ -477,6 +441,7 @@ function storedPayment(request: PaymentRequest): {
   idempotencyKey: string;
   expectedTotalCents: string;
   lines: { lineId: string; quantity: number; snapshotPriceCents: string }[];
+  orderLines?: OrderSummaryLine[];
 } {
   return {
     cartId: request.cartId,
@@ -487,7 +452,21 @@ function storedPayment(request: PaymentRequest): {
       quantity: line.quantity,
       snapshotPriceCents: line.snapshotPriceCents.toString(),
     })),
+    orderLines: request.orderLines,
   };
+}
+
+function fallbackOrderLines(request: PaymentRequest): OrderSummaryLine[] {
+  if (request.orderLines && request.orderLines.length > 0) {
+    return request.orderLines;
+  }
+  return request.lines.map((line) => ({
+    lineId: line.lineId,
+    name: "Item",
+    quantity: line.quantity,
+    priceCents: line.snapshotPriceCents.toString(),
+    lineType: "PACK",
+  }));
 }
 
 function checkoutNotice(error: unknown): string {
@@ -501,10 +480,10 @@ function checkoutNotice(error: unknown): string {
     return "The seller removed this listing.\n\nRemove it from your cart.";
   }
   if (error.code === "CART_CHANGED" || error.code === "LISTING_PRICE_CHANGED") {
-    return "Your cart changed\n\nOne or more items changed since you reviewed your order.";
+    return "Your cart changed\n\nOne or more items changed. Check the cart and pay again.";
   }
   if (error.code === "CHECKOUT_TOTAL_CHANGED") {
-    return "The total changed. Review your cart before paying.";
+    return "The total changed. Check your cart before paying.";
   }
   if (error.code === "SOLD_OUT") {
     return "That pack is sold out.\n\nRemove it from your cart.";
@@ -585,15 +564,40 @@ const styles = StyleSheet.create({
     paddingHorizontal: layout.screenPadding,
     paddingTop: spacing.sm,
   },
-  notice: {
+  itemsCard: {
+    backgroundColor: colors.surfacePrimary,
+    borderColor: colors.borderSubtle,
+    borderRadius: radius.card,
+    borderWidth: 1,
+    paddingHorizontal: layout.cardPadding,
+    paddingTop: spacing.md,
+  },
+  itemsHeading: {
+    ...typography.label,
+    color: colors.textTertiary,
+    marginBottom: spacing.xs,
+  },
+  addMore: {
+    alignItems: "center",
+    borderTopColor: colors.borderSubtle,
+    borderTopWidth: 1,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.xs,
+    justifyContent: "center",
+    minHeight: layout.minTouchTarget,
+    paddingVertical: spacing.md,
+  },
+  addMorePressed: {
+    opacity: 0.7,
+  },
+  addMoreHint: {
     ...typography.bodySmall,
     color: colors.textSecondary,
   },
-  block: {
-    gap: spacing.sm,
-  },
-  list: {
-    gap: spacing.base,
+  addMoreLink: {
+    ...typography.bodyMedium,
+    color: colors.accent.solid,
   },
   ctaBar: {
     backgroundColor: colors.backgroundSecondary,
@@ -602,5 +606,33 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     paddingHorizontal: layout.screenPadding,
     paddingTop: spacing.md,
+  },
+  payRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.md,
+  },
+  payMeta: {
+    flex: 1,
+    gap: spacing.xxs,
+    minWidth: 0,
+  },
+  payVia: {
+    ...typography.caption,
+    color: colors.textTertiary,
+    textTransform: "uppercase",
+  },
+  payTotalRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.xs,
+  },
+  payTotal: {
+    ...typography.money,
+    color: colors.textPrimary,
+  },
+  payButton: {
+    flexGrow: 0,
+    minWidth: 132,
   },
 });

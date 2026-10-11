@@ -1,3 +1,4 @@
+import { hasListingArtwork } from "../../components/catalogArtwork";
 import type { PackCategory } from "../../navigation/types";
 import { formatCents } from "../../utils/money";
 import {
@@ -28,6 +29,12 @@ export function selectListings(listings: readonly MarketListing[], query: Market
       return false;
     }
     if (query.category !== "ALL" && listing.category !== query.category) {
+      return false;
+    }
+    if (
+      (listing.category === "WATCH" || listing.category === "SNEAKER")
+      && !hasListingArtwork(listing.category, listing.name, listing.imageUrl)
+    ) {
       return false;
     }
     if (query.rarity && listing.rarity !== query.rarity) {

@@ -1,5 +1,9 @@
 import { packsOpenedLabel } from "./pacing";
 
+export function gestureFreeOpening(reduced: boolean, screenReader: boolean): boolean {
+  return reduced || screenReader;
+}
+
 export type RevealMotion = {
   travelPx: number;
   scaleFrom: number;
@@ -18,14 +22,14 @@ export function sealedDirection(reduced: boolean): string {
   if (reduced) {
     return "Sealed. Reveal next card.";
   }
-  return "Sealed. Drag down to tear it open.";
+  return "Sealed. Swipe the seal.";
 }
 
-export function nextCardLabel(hasAnother: boolean): "Reveal next card" | "Done" {
+export function nextCardLabel(hasAnother: boolean): "Reveal next card" | "View Collection" {
   if (hasAnother) {
     return "Reveal next card";
   }
-  return "Done";
+  return "View Collection";
 }
 
 export function spokenRarity(rarity: string): string {

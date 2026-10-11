@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useFocusEffect, useNavigation, useRoute } from "@react-navigation/native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Crypto from "expo-crypto";
@@ -10,6 +10,7 @@ import {
   StyleSheet,
   Text,
   View,
+  useWindowDimensions,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -24,10 +25,10 @@ import { ErrorState } from "../../components/ErrorState";
 import { InlineStatusCard } from "../../components/InlineStatusCard";
 import { RecoveryAction } from "../../components/RecoveryAction";
 import { DetailSkeleton } from "../../components/Skeleton";
-import { IconButton, PrimaryButton } from "../../components/buttons";
-import { iconSlot } from "../../components/Icon";
+import { IconButton, PrimaryButton, TertiaryButton } from "../../components/buttons";
+import { Icon, iconSlot } from "../../components/Icon";
 import type { AppStackParamList } from "../../navigation/types";
-import { colors, layout, maxFontScale, radius, spacing, typography } from "../../theme";
+import { colors, imageAspect, layout, maxFontScale, radius, spacing, typography } from "../../theme";
 import { formatCents } from "../../utils/money";
 import type { TimedDrop } from "../drops/board";
 import { useClockLabel } from "../drops/DropCountdown";
@@ -35,15 +36,18 @@ import { dropClosedCopy, dropCtaLabel } from "../drops/dropCopy";
 import { browsePacks, browseSimilar } from "../drops/dropNav";
 import { DropStatus } from "../drops/DropStatus";
 import { useDropBoard } from "../drops/useDropBoard";
+import { useWalletBalance } from "../wallet/useWalletBalance";
 import {
   categoryLabel,
   clampQuantity,
   formatBasisPoints,
   loadPackOdds,
   loadShelfPacks,
+  packTierClass,
   rarityLabel,
+  rarityOrder,
   stockLabel,
-  type Rarity,
+  type PackOdds,
 } from "./packs";
 import { useOnline } from "./useOnline";
 
@@ -54,7 +58,9 @@ export function PackDetailScreen() {
   const route = useRoute<RouteProp<AppStackParamList, "PackDetail">>();
   const queryClient = useQueryClient();
   const insets = useSafeAreaInsets();
+  const { width: windowWidth } = useWindowDimensions();
   const online = useOnline();
+  const balance = useWalletBalance();
   const [requested, setRequested] = useState(1);
   const [quantityOpen, setQuantityOpen] = useState(false);
   const [reserving, setReserving] = useState(false);
@@ -93,10 +99,19 @@ export function PackDetailScreen() {
   const failed = !pack && packs.isError && drops.isError;
   const total = pack ? pack.priceCents * BigInt(quantity) : 0n;
   const cap = selectionCap > 100n ? 100 : Number(selectionCap);
+  const heroWidth = Math.min(windowWidth - layout.screenPadding * 2, 360);
+  const heroHeight = Math.round(heroWidth / imageAspect.tradingCard);
+  const tierClass = pack ? packTierClass(pack.priceCents) : "entry";
+  const oddsRows = useMemo(() => completeOdds(odds.data), [odds.data]);
+  const oddsTotalPoints = useMemo(
+    () => oddsRows.reduce((sum, row) => sum + row.basisPoints, 0),
+    [oddsRows],
+  );
 
   useFocusEffect(
     useCallback(() => {
       void queryClient.invalidateQueries({ queryKey: ["shelf-packs"] });
+      void queryClient.invalidateQueries({ queryKey: ["wallet"] });
     }, [queryClient]),
   );
 
@@ -144,13 +159,29 @@ export function PackDetailScreen() {
 
   const ctaLabel = quantity < 1
     ? "Sold out"
-    : `Add ${quantity} to Cart · ${formatCents(total)}`;
+    : pack?.drop && pack.drop.status === "LIVE"
+      ? `Reserve ${quantity} · ${formatCents(total)}`
+      : `Add ${quantity} to Cart · ${formatCents(total)}`;
   const canReserve = online && dropOpen && quantity >= 1 && !reserveUnknown;
+
+  const walletLabel = balance.data !== undefined
+    ? formatCents(balance.data)
+    : balance.isError
+      ? "Unavailable"
+      : "—";
+  const canCover = balance.data !== undefined && pack ? balance.data >= total : null;
+  const shortfall = balance.data !== undefined && pack && balance.data < total
+    ? total - balance.data
+    : null;
 
   return (
     <View style={styles.screen}>
-      <AppHeader back cart />
-      <ScrollView contentContainerStyle={styles.content} style={styles.scroll}>
+      <AppHeader back cart wallet />
+      <ScrollView
+        contentContainerStyle={styles.content}
+        style={styles.scroll}
+        keyboardShouldPersistTaps="handled"
+      >
         <ConnectivityBanner offlineDetail="Price and availability may be out of date. Reservations stay disabled until the connection returns." />
 
         {loading ? <DetailSkeleton accessibilityLabel="Loading this pack" /> : null}
@@ -174,77 +205,188 @@ export function PackDetailScreen() {
 
         {pack ? (
           <View style={styles.body}>
-            <CollectibleArt category={pack.category} height={220} title={pack.name} />
-            <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.kicker}>
-              {categoryLabel(pack.category)}
-            </Text>
-            <Text maxFontSizeMultiplier={maxFontScale.display} style={styles.name}>{pack.name}</Text>
-            <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.tier}>{pack.tier}</Text>
-            <Text maxFontSizeMultiplier={maxFontScale.display} style={styles.price}>{formatCents(pack.priceCents)}</Text>
-            {pack.drop && drops.data ? (
-              <DropStatus board={drops.data} drop={pack.drop} />
-            ) : (
-              <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.availability}>
-                {stockLabel(pack.reservable)}
-              </Text>
-            )}
-            {pack.maxPerUser ? (
-              <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.notice}>
-                Maximum {pack.maxPerUser} packs per user
-              </Text>
-            ) : null}
-
-            <View style={styles.section}>
-              <Text accessibilityRole="header" maxFontSizeMultiplier={maxFontScale.body} style={styles.sectionTitle}>
-                What&apos;s inside
-              </Text>
-              {odds.isLoading ? (
-                <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.notice}>Loading odds…</Text>
-              ) : null}
-              {odds.isError ? (
-                <ErrorState title="Odds didn't load. Try again." onRetry={() => void odds.refetch()} />
-              ) : null}
-              {odds.data && odds.data.length === 0 ? (
-                <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.notice}>
-                  Odds are not published for this pack.
-                </Text>
-              ) : null}
-              {odds.data?.map((row) => (
-                <View key={row.rarity} style={styles.oddsRow}>
-                  <Text maxFontSizeMultiplier={maxFontScale.body} style={[styles.oddsRarity, { color: rarityColor(row.rarity) }]}>
-                    {rarityLabel(row.rarity)}
-                  </Text>
-                  <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.oddsValue}>
-                    {formatBasisPoints(row.basisPoints)}
+            <View
+              style={[
+                styles.heroFrame,
+                tierClass === "grail" ? styles.heroFrameGrail : tierClass === "premium" ? styles.heroFramePremium : null,
+                { width: heroWidth, alignSelf: "center" },
+              ]}
+            >
+              <View style={styles.heroGlow} />
+              <CollectibleArt
+                category={pack.category}
+                fit="contain"
+                height={heroHeight}
+                style={styles.heroArt}
+                title={pack.name}
+              />
+              {pack.drop ? (
+                <View style={styles.heroBadge}>
+                  <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.heroBadgeLabel}>
+                    {pack.drop.status === "LIVE" ? "Live drop" : pack.drop.status === "UPCOMING" ? "Timed drop" : "Drop"}
                   </Text>
                 </View>
-              ))}
+              ) : null}
+            </View>
+
+            <View style={styles.identity}>
+              <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.kicker}>
+                {categoryLabel(pack.category)} · {pack.tier}
+              </Text>
+              <Text
+                accessibilityRole="header"
+                maxFontSizeMultiplier={maxFontScale.display}
+                style={styles.name}
+              >
+                {pack.name}
+              </Text>
+              <Text maxFontSizeMultiplier={maxFontScale.display} style={styles.price}>
+                {formatCents(pack.priceCents)}
+              </Text>
+              <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.unitHint}>
+                Per pack
+              </Text>
+            </View>
+
+            <View style={styles.contextCard}>
+              <View style={styles.contextRow}>
+                <Icon color={colors.accent.solid} name="wallet-outline" size={18} />
+                <View style={styles.contextCopy}>
+                  <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.contextLabel}>Wallet</Text>
+                  <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.contextValue}>{walletLabel}</Text>
+                </View>
+                <TertiaryButton label="Deposit" onPress={() => navigation.navigate("Wallet")} size="sm" />
+              </View>
+              {quantity >= 1 && shortfall !== null ? (
+                <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.contextWarn}>
+                  Need {formatCents(shortfall)} more for this quantity. You can still reserve; checkout checks balance.
+                </Text>
+              ) : null}
+              {quantity >= 1 && canCover === true ? (
+                <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.contextOk}>
+                  Balance covers {formatCents(total)} for {quantity} {quantity === 1 ? "pack" : "packs"}.
+                </Text>
+              ) : null}
+            </View>
+
+            <View style={styles.availabilityCard}>
+              {pack.drop && drops.data ? (
+                <DropStatus board={drops.data} drop={pack.drop} />
+              ) : (
+                <View style={styles.stockRow}>
+                  <Icon
+                    color={pack.reservable > 0n ? colors.status.success.solid : colors.status.error.solid}
+                    name={pack.reservable > 0n ? "checkmark-circle-outline" : "close-circle-outline"}
+                    size={18}
+                  />
+                  <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.availability}>
+                    {stockLabel(pack.reservable)}
+                  </Text>
+                </View>
+              )}
+              {pack.maxPerUser ? (
+                <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.notice}>
+                  Maximum {pack.maxPerUser} packs per user for this drop.
+                </Text>
+              ) : null}
+            </View>
+
+            <View style={styles.section}>
+              <View style={styles.sectionHead}>
+                <Text accessibilityRole="header" maxFontSizeMultiplier={maxFontScale.body} style={styles.sectionTitle}>
+                  What&apos;s inside
+                </Text>
+                {oddsTotalPoints > 0 ? (
+                  <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.sectionMeta}>
+                    {formatBasisPoints(oddsTotalPoints)} published
+                  </Text>
+                ) : null}
+              </View>
+              <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.sectionLead}>
+                Published pull rates for this pack. Exact contents are assigned when you open it.
+              </Text>
+              <View style={styles.oddsCard}>
+                {odds.isLoading ? (
+                  <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.notice}>Loading odds…</Text>
+                ) : null}
+                {odds.isError ? (
+                  <ErrorState title="Odds didn't load. Try again." onRetry={() => void odds.refetch()} />
+                ) : null}
+                {odds.data && odds.data.length === 0 ? (
+                  <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.notice}>
+                    Odds are not published for this pack.
+                  </Text>
+                ) : null}
+                {oddsRows.map((row) => (
+                  <OddsRow key={row.rarity} row={row} />
+                ))}
+              </View>
             </View>
 
             {pack.drop && pack.drop.status !== "LIVE" ? (
-              <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.notice}>
-                {dropClosedCopy(pack.drop.status)}
-              </Text>
+              <InlineStatusCard
+                icon="time-outline"
+                title={dropClosedCopy(pack.drop.status)}
+                tone="info"
+              />
             ) : quantity === 0 ? (
-              <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.notice}>
-                Sold out. None of these packs are left to reserve.
-              </Text>
+              <InlineStatusCard
+                icon="close-circle-outline"
+                title="Sold out. None of these packs are left to reserve."
+                tone="warning"
+              />
             ) : (
-              <Pressable
-                accessibilityLabel={`Quantity ${quantity}. Change`}
-                accessibilityRole="button"
-                onPress={() => setQuantityOpen(true)}
-                style={({ pressed }) => [styles.qtyRow, pressed ? styles.qtyPressed : null]}
-              >
-                <View style={styles.qtyCopy}>
-                  <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.sectionTitle}>Quantity</Text>
-                  <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.summaryLine}>
-                    {quantity} × {formatCents(pack.priceCents)}
-                  </Text>
+              <View style={styles.qtyCard}>
+                <View style={styles.qtyHeader}>
+                  <View style={styles.qtyCopy}>
+                    <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.sectionTitle}>Quantity</Text>
+                    <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.summaryLine}>
+                      {quantity} × {formatCents(pack.priceCents)} = {formatCents(total)}
+                    </Text>
+                  </View>
+                  <Pressable
+                    accessibilityLabel="Open quantity presets"
+                    accessibilityRole="button"
+                    onPress={() => setQuantityOpen(true)}
+                    style={({ pressed }) => [styles.qtyChip, pressed ? styles.qtyPressed : null]}
+                  >
+                    <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.qtyChipLabel}>Presets</Text>
+                  </Pressable>
                 </View>
-                <Text maxFontSizeMultiplier={maxFontScale.display} style={styles.quantity}>{quantity}</Text>
-              </Pressable>
+                <View style={styles.stepper}>
+                  <IconButton
+                    accessibilityLabel="Decrease quantity"
+                    disabled={quantity <= 1 || reserving}
+                    icon={iconSlot("remove", 20)}
+                    variant="surface"
+                    onPress={() => setRequested(Math.max(1, quantity - 1))}
+                  />
+                  <Text
+                    accessibilityLabel={`Quantity ${quantity}`}
+                    maxFontSizeMultiplier={maxFontScale.display}
+                    style={styles.quantity}
+                  >
+                    {quantity}
+                  </Text>
+                  <IconButton
+                    accessibilityLabel="Increase quantity"
+                    disabled={quantity >= cap || reserving}
+                    icon={iconSlot("add", 20)}
+                    variant="surface"
+                    onPress={() => setRequested(Math.min(cap, quantity + 1))}
+                  />
+                </View>
+              </View>
             )}
+
+            <View style={styles.trustCard}>
+              <Text accessibilityRole="header" maxFontSizeMultiplier={maxFontScale.body} style={styles.sectionTitle}>
+                Before you buy
+              </Text>
+              <TrustLine icon="lock-closed-outline" text="Checkout holds stock for a few minutes, then charges your wallet." />
+              <TrustLine icon="shuffle-outline" text="Pack contents are assigned on open. Odds above are the published rates." />
+              <TrustLine icon="albums-outline" text="Opened cards go to your collection. Listing and sales stay there." />
+            </View>
           </View>
         ) : null}
       </ScrollView>
@@ -257,6 +399,11 @@ export function PackDetailScreen() {
               title={reserveNotice}
               tone={reserveUnknown ? "warning" : "info"}
             />
+          ) : null}
+          {!online ? (
+            <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.ctaNotice}>
+              Offline — reservations stay disabled until the connection returns.
+            </Text>
           ) : null}
           {pack.drop && pack.drop.status !== "LIVE" && drops.data ? (
             <ClosedDropCta
@@ -276,6 +423,7 @@ export function PackDetailScreen() {
             />
           ) : (
             <PrimaryButton
+              accessibilityHint={canReserve ? "Reserves this pack and opens your cart" : undefined}
               disabled={!canReserve}
               fullWidth
               label={ctaLabel}
@@ -330,10 +478,39 @@ export function PackDetailScreen() {
             />
           </View>
           <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.summaryLine}>
-            {quantity} × {formatCents(pack.priceCents)}
+            {quantity} × {formatCents(pack.priceCents)} = {formatCents(total)}
           </Text>
         </AppBottomSheet>
       ) : null}
+    </View>
+  );
+}
+
+function OddsRow({ row }: { row: PackOdds }) {
+  const tone = colors.rarity[row.rarity];
+  const width = Math.max(4, Math.min(100, Math.round(row.basisPoints / 100)));
+  return (
+    <View style={styles.oddsRow} accessibilityLabel={`${rarityLabel(row.rarity)}. ${formatBasisPoints(row.basisPoints)}`}>
+      <View style={styles.oddsTop}>
+        <Text maxFontSizeMultiplier={maxFontScale.body} style={[styles.oddsRarity, { color: tone.solid }]}>
+          {rarityLabel(row.rarity)}
+        </Text>
+        <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.oddsValue}>
+          {formatBasisPoints(row.basisPoints)}
+        </Text>
+      </View>
+      <View style={styles.oddsTrack}>
+        <View style={[styles.oddsFill, { width: `${width}%`, backgroundColor: tone.solid }]} />
+      </View>
+    </View>
+  );
+}
+
+function TrustLine({ icon, text }: { icon: "lock-closed-outline" | "shuffle-outline" | "albums-outline"; text: string }) {
+  return (
+    <View style={styles.trustLine}>
+      <Icon color={colors.premium.gold} name={icon} size={18} />
+      <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.trustText}>{text}</Text>
     </View>
   );
 }
@@ -369,8 +546,16 @@ function reserveCap(reservable: bigint, maxPerUser: number | null): bigint {
   return reservable < limit ? reservable : limit;
 }
 
-function rarityColor(rarity: Rarity): string {
-  return colors.rarity[rarity].solid;
+/** Keep rarity order complete when the API returns a full set; otherwise show what published. */
+function completeOdds(rows: PackOdds[] | undefined): PackOdds[] {
+  if (!rows || rows.length === 0) {
+    return [];
+  }
+  const byRarity = new Map(rows.map((row) => [row.rarity, row]));
+  const ordered = rarityOrder
+    .map((rarity) => byRarity.get(rarity))
+    .filter((row): row is PackOdds => row !== undefined);
+  return ordered.length > 0 ? ordered : rows;
 }
 
 const styles = StyleSheet.create({
@@ -383,57 +568,163 @@ const styles = StyleSheet.create({
   },
   content: {
     gap: spacing.md,
-    paddingBottom: layout.stickyCtaClearance,
+    paddingBottom: layout.stickyCtaClearance + spacing.xl,
     paddingHorizontal: layout.screenPadding,
     paddingTop: spacing.sm,
   },
   body: {
-    gap: spacing.sm,
+    gap: spacing.md,
   },
-  block: {
-    gap: spacing.sm,
+  heroFrame: {
+    backgroundColor: colors.surfacePrimary,
+    borderColor: colors.borderSubtle,
+    borderRadius: radius.card,
+    borderWidth: 1,
+    marginBottom: spacing.sm,
+    overflow: "hidden",
+    padding: spacing.md,
+  },
+  heroFramePremium: {
+    borderColor: colors.accent.border,
+  },
+  heroFrameGrail: {
+    borderColor: colors.premium.goldBorder,
+  },
+  heroGlow: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: colors.premium.goldMuted,
+    opacity: 0.35,
+  },
+  heroArt: {
+    backgroundColor: "transparent",
+    width: "100%",
+  },
+  heroBadge: {
+    alignSelf: "flex-start",
+    backgroundColor: colors.accent.muted,
+    borderColor: colors.accent.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    marginTop: spacing.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xxs,
+  },
+  heroBadgeLabel: {
+    ...typography.label,
+    color: colors.accent.solid,
+    fontSize: 10,
+  },
+  identity: {
+    gap: spacing.xxs,
   },
   kicker: {
     ...typography.label,
     color: colors.textTertiary,
-    marginTop: spacing.sm,
   },
   name: {
     ...typography.display,
     color: colors.textPrimary,
-  },
-  tier: {
-    ...typography.body,
-    color: colors.textSecondary,
   },
   price: {
     ...typography.moneyLarge,
     color: colors.textPrimary,
     marginTop: spacing.xs,
   },
-  availability: {
+  unitHint: {
+    ...typography.caption,
+    color: colors.textTertiary,
+  },
+  contextCard: {
+    backgroundColor: colors.surfacePrimary,
+    borderColor: colors.borderSubtle,
+    borderRadius: radius.card,
+    borderWidth: 1,
+    gap: spacing.sm,
+    padding: spacing.base,
+  },
+  contextRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.md,
+  },
+  contextCopy: {
+    flex: 1,
+    gap: spacing.xxs,
+    minWidth: 0,
+  },
+  contextLabel: {
+    ...typography.label,
+    color: colors.textTertiary,
+  },
+  contextValue: {
+    ...typography.moneySmall,
+    color: colors.textPrimary,
+  },
+  contextWarn: {
     ...typography.bodySmall,
-    color: colors.textSecondary,
+    color: colors.status.warning.solid,
+  },
+  contextOk: {
+    ...typography.bodySmall,
+    color: colors.status.success.solid,
+  },
+  availabilityCard: {
+    backgroundColor: colors.surfacePrimary,
+    borderColor: colors.borderSubtle,
+    borderRadius: radius.card,
+    borderWidth: 1,
+    gap: spacing.sm,
+    padding: spacing.base,
+  },
+  stockRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.sm,
+  },
+  availability: {
+    ...typography.bodyMedium,
+    color: colors.textPrimary,
   },
   section: {
     gap: spacing.sm,
-    marginTop: layout.sectionGap,
+  },
+  sectionHead: {
+    alignItems: "baseline",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    gap: spacing.sm,
   },
   sectionTitle: {
     ...typography.heading,
     color: colors.textPrimary,
   },
+  sectionMeta: {
+    ...typography.caption,
+    color: colors.textTertiary,
+  },
+  sectionLead: {
+    ...typography.bodySmall,
+    color: colors.textSecondary,
+  },
   notice: {
     ...typography.bodySmall,
     color: colors.textSecondary,
   },
+  oddsCard: {
+    backgroundColor: colors.surfacePrimary,
+    borderColor: colors.borderSubtle,
+    borderRadius: radius.card,
+    borderWidth: 1,
+    gap: spacing.md,
+    padding: spacing.base,
+  },
   oddsRow: {
-    borderBottomColor: colors.borderSubtle,
-    borderBottomWidth: 1,
+    gap: spacing.xs,
+  },
+  oddsTop: {
+    alignItems: "center",
     flexDirection: "row",
     justifyContent: "space-between",
-    minHeight: 44,
-    paddingVertical: spacing.md,
   },
   oddsRarity: {
     ...typography.bodyMedium,
@@ -442,51 +733,89 @@ const styles = StyleSheet.create({
     ...typography.moneySmall,
     color: colors.textPrimary,
   },
-  stepper: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: spacing.lg,
-    marginTop: spacing.sm,
+  oddsTrack: {
+    backgroundColor: colors.surfaceElevated,
+    borderRadius: radius.full,
+    height: 6,
+    overflow: "hidden",
   },
-  qtyRow: {
-    alignItems: "center",
+  oddsFill: {
+    borderRadius: radius.full,
+    height: "100%",
+    opacity: 0.85,
+  },
+  qtyCard: {
     backgroundColor: colors.surfacePrimary,
     borderColor: colors.borderSubtle,
     borderRadius: radius.card,
     borderWidth: 1,
+    gap: spacing.md,
+    padding: spacing.base,
+  },
+  qtyHeader: {
+    alignItems: "center",
     flexDirection: "row",
     gap: spacing.md,
-    marginTop: layout.sectionGap,
-    minHeight: layout.minTouchTarget,
-    paddingHorizontal: spacing.base,
-    paddingVertical: spacing.md,
-  },
-  qtyPressed: {
-    backgroundColor: colors.surfacePressed,
   },
   qtyCopy: {
     flex: 1,
     gap: spacing.xxs,
   },
+  qtyChip: {
+    backgroundColor: colors.accent.muted,
+    borderColor: colors.accent.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    minHeight: layout.minTouchTarget,
+    justifyContent: "center",
+    paddingHorizontal: spacing.md,
+  },
+  qtyChipLabel: {
+    ...typography.buttonSmall,
+    color: colors.accent.solid,
+  },
+  qtyPressed: {
+    backgroundColor: colors.surfacePressed,
+  },
+  stepper: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.lg,
+    justifyContent: "center",
+  },
   quantity: {
     ...typography.title,
     color: colors.textPrimary,
-    minWidth: 40,
+    minWidth: 48,
     textAlign: "center",
   },
   summaryLine: {
     ...typography.body,
     color: colors.textSecondary,
-    marginTop: spacing.md,
   },
-  total: {
-    ...typography.money,
-    color: colors.textPrimary,
+  trustCard: {
+    backgroundColor: colors.surfacePrimary,
+    borderColor: colors.premium.goldBorder,
+    borderRadius: radius.card,
+    borderWidth: 1,
+    gap: spacing.md,
+    marginBottom: spacing.md,
+    padding: spacing.base,
+  },
+  trustLine: {
+    alignItems: "flex-start",
+    flexDirection: "row",
+    gap: spacing.md,
+  },
+  trustText: {
+    ...typography.bodySmall,
+    color: colors.textSecondary,
+    flex: 1,
   },
   ctaBar: {
     backgroundColor: colors.backgroundSecondary,
     borderTopColor: colors.borderSubtle,
-    borderTopWidth: 1,
+    borderTopWidth: StyleSheet.hairlineWidth,
     gap: spacing.sm,
     paddingHorizontal: layout.screenPadding,
     paddingTop: spacing.md,

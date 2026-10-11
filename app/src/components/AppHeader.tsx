@@ -200,16 +200,15 @@ const styles = StyleSheet.create({
   walletChip: {
     alignItems: "center",
     backgroundColor: colors.surfacePrimary,
-    borderColor: colors.borderSubtle,
     borderRadius: radius.button,
-    borderWidth: 1,
     flexDirection: "row",
     gap: spacing.xs + 2,
     minHeight: layout.minTouchTarget,
     paddingHorizontal: spacing.md,
   },
   walletChipPressed: {
-    backgroundColor: colors.surfaceElevated,
+    backgroundColor: colors.surfacePressed,
+    opacity: 0.92,
   },
   walletAmount: {
     ...typography.moneySmall,

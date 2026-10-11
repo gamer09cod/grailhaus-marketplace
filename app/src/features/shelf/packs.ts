@@ -1,4 +1,5 @@
 import { supabase } from "../../api/supabase";
+import { hasListingArtwork } from "../../components/catalogArtwork";
 import type { PackCategory } from "../../navigation/types";
 import { centsFromWire } from "../../utils/money";
 
@@ -15,6 +16,16 @@ export type ShelfPack = {
   tier: string;
   priceCents: bigint;
   reservable: bigint;
+};
+
+/** Fixed sneaker/watch catalog products shown as items, not pack SKUs. */
+export type ShelfCatalogItem = {
+  id: string;
+  category: "SNEAKER" | "WATCH";
+  name: string;
+  rarity: Rarity;
+  valueCents: bigint;
+  imageUrl: string | null;
 };
 
 export type PackOdds = {
@@ -124,17 +135,15 @@ export function scarcityLabel(reservable: bigint): string | null {
 }
 
 export function featuredPacks(packs: readonly ShelfPack[]): ShelfPack[] {
-  return shelfCategories.flatMap((category) => {
-    const inCategory = packs.filter((pack) => pack.category === category);
-    const first = inCategory[0];
-    if (!first) {
-      return [];
-    }
-    const richest = inCategory.reduce((best, pack) =>
-      pack.priceCents > best.priceCents ? pack : best,
-    );
-    return [richest];
-  });
+  const cards = packs.filter((pack) => pack.category === "TRADING_CARD");
+  const first = cards[0];
+  if (!first) {
+    return [];
+  }
+  const richest = cards.reduce((best, pack) =>
+    pack.priceCents > best.priceCents ? pack : best,
+  );
+  return [richest];
 }
 
 export function clampQuantity(requested: number, reservable: bigint): number {
@@ -150,7 +159,8 @@ export async function loadShelfPacks(): Promise<ShelfPack[]> {
     .from("pack_skus")
     .select("id, category, name, tier, price_cents, stock_on_hand, stock_reserved")
     .eq("active", true)
-    .eq("is_drop", false);
+    .eq("is_drop", false)
+    .in("category", ["TRADING_CARD", "SNEAKER", "WATCH"]);
 
   if (error) {
     throw new Error(error.message);
@@ -188,6 +198,58 @@ export async function loadShelfPacks(): Promise<ShelfPack[]> {
   });
 
   return packs;
+}
+
+export async function loadShelfCatalogItems(): Promise<ShelfCatalogItem[]> {
+  const { data, error } = await supabase
+    .from("catalog_items")
+    .select("id, category, name, rarity, current_value_cents, image_url")
+    .in("category", ["SNEAKER", "WATCH"]);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const items: ShelfCatalogItem[] = [];
+  for (const row of data ?? []) {
+    if (row.category !== "SNEAKER" && row.category !== "WATCH") {
+      continue;
+    }
+    if (!isRarity(row.rarity)) {
+      continue;
+    }
+    const imageUrl = row.image_url && row.image_url.length > 0 ? row.image_url : null;
+    // Hide sneaker/watch catalog rows with no product JPEG and no remote image_url.
+    if (!hasListingArtwork(row.category, row.name, imageUrl)) {
+      continue;
+    }
+    items.push({
+      id: row.id,
+      category: row.category,
+      name: row.name,
+      rarity: row.rarity,
+      valueCents: centsFromWire(row.current_value_cents),
+      imageUrl,
+    });
+  }
+
+  items.sort((left, right) => {
+    const categoryDelta = left.category === right.category
+      ? 0
+      : left.category === "SNEAKER"
+        ? -1
+        : 1;
+    if (categoryDelta !== 0) {
+      return categoryDelta;
+    }
+    const rarityDelta = rarityOrder.indexOf(left.rarity) - rarityOrder.indexOf(right.rarity);
+    if (rarityDelta !== 0) {
+      return rarityDelta;
+    }
+    return left.name.localeCompare(right.name);
+  });
+
+  return items;
 }
 
 export async function loadPackOdds(packId: string): Promise<PackOdds[]> {

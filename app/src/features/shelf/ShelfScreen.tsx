@@ -8,6 +8,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from "react-native";
 
@@ -22,7 +23,7 @@ import { HomeRailSkeleton } from "../../components/Skeleton";
 import { PrimaryButton, SecondaryButton, TertiaryButton } from "../../components/buttons";
 import { Icon } from "../../components/Icon";
 import type { AppStackParamList } from "../../navigation/types";
-import { colors, layout, maxFontScale, radius, spacing, typography } from "../../theme";
+import { catalogGrid, colors, layout, maxFontScale, radius, spacing, typography } from "../../theme";
 import { formatCents } from "../../utils/money";
 import { loadHoldings, type OwnedHolding } from "../collection/inventory";
 import { formatSignedCents, portfolioTotals } from "../collection/portfolio";
@@ -33,11 +34,21 @@ import { otherActiveDrops, pickHeroDrop } from "../drops/select";
 import { useDropBoard } from "../drops/useDropBoard";
 import { useWalletBalance } from "../wallet/useWalletBalance";
 import { HomePackTile } from "./HomePackTile";
-import { featuredPacks, loadShelfPacks, rarityLabel, type Rarity, type ShelfPack } from "./packs";
+import {
+  featuredPacks,
+  loadShelfPacks,
+  rarityLabel,
+  type Rarity,
+  type ShelfPack,
+} from "./packs";
 import { timeAgo } from "./timeAgo";
 export function ShelfScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<AppStackParamList>>();
   const queryClient = useQueryClient();
+  const { width: windowWidth } = useWindowDimensions();
+  // Home rails use a wider editorial tile than the dense 3-up catalog grid.
+  const packTileWidth = Math.min(Math.round((windowWidth - layout.screenPadding * 2) * 0.62), 240);
+  const packArtHeight = Math.round(packTileWidth);
   const packs = useQuery({ queryKey: ["shelf-packs"], queryFn: loadShelfPacks });
   const drops = useDropBoard();
   const holdings = useQuery({ queryKey: ["holdings"], queryFn: loadHoldings });
@@ -79,16 +90,27 @@ export function ShelfScreen() {
   const board = drops.data;
   const hero = board ? pickHeroDrop(board.drops) : null;
   const moreDrops = board ? otherActiveDrops(board.drops, hero?.dropId ?? null) : [];
-  const showcase = packs.data ? showcasePacks(packs.data) : [];
+  const showcase = packs.data ? showcasePacks(packs.data, "TRADING_CARD") : [];
+  const sneakers = packs.data ? showcasePacks(packs.data, "SNEAKER") : [];
+  const watches = packs.data ? showcasePacks(packs.data, "WATCH") : [];
   const recent = (holdings.data ?? []).slice(0, 8);
   const totals = holdings.data && holdings.data.length > 0 ? portfolioTotals(holdings.data) : null;
   const sealedPacks = sealed.data ?? [];
-  const refreshing = (packs.isRefetching || drops.isRefetching || holdings.isRefetching || sealed.isRefetching)
+  const refreshing = (
+    packs.isRefetching
+    || drops.isRefetching
+    || holdings.isRefetching
+    || sealed.isRefetching
+  )
     && !packs.isLoading
     && !drops.isLoading;
 
   const openPack = useCallback((packId: string) => {
     navigation.navigate("PackDetail", { packId });
+  }, [navigation]);
+
+  const openCategoryShelf = useCallback((category: "SNEAKER" | "WATCH") => {
+    navigation.navigate("Category", { category });
   }, [navigation]);
 
   return (
@@ -159,7 +181,81 @@ export function ShelfScreen() {
           </Section>
         )}
 
-        <WalletSummary onDeposit={() => navigation.navigate("Wallet")} />
+        {packs.isLoading ? (
+          <Section title="Card packs">
+            <ScrollView horizontal contentContainerStyle={styles.rail} showsHorizontalScrollIndicator={false}>
+              <HomeRailSkeleton artHeight={packArtHeight} width={packTileWidth} />
+            </ScrollView>
+          </Section>
+        ) : showcase.length > 0 ? (
+          <Section
+            actionLabel="See all"
+            title="Card packs"
+            onAction={() => navigation.navigate("Tabs", { screen: "Packs" })}
+          >
+            <ScrollView horizontal contentContainerStyle={styles.rail} showsHorizontalScrollIndicator={false}>
+              {showcase.map((pack) => (
+                <HomePackTile
+                  key={pack.id}
+                  artHeight={packArtHeight}
+                  pack={pack}
+                  width={packTileWidth}
+                  onOpen={openPack}
+                />
+              ))}
+            </ScrollView>
+          </Section>
+        ) : null}
+
+        {packs.isLoading ? (
+          <Section title="Sneaker packs">
+            <ScrollView horizontal contentContainerStyle={styles.rail} showsHorizontalScrollIndicator={false}>
+              <HomeRailSkeleton artHeight={packArtHeight} width={packTileWidth} />
+            </ScrollView>
+          </Section>
+        ) : sneakers.length > 0 ? (
+          <Section
+            actionLabel="See all"
+            title="Sneaker packs"
+            onAction={() => openCategoryShelf("SNEAKER")}
+          >
+            <ScrollView horizontal contentContainerStyle={styles.rail} showsHorizontalScrollIndicator={false}>
+              {sneakers.map((pack) => (
+                <HomePackTile
+                  key={pack.id}
+                  artHeight={packArtHeight}
+                  pack={pack}
+                  width={packTileWidth}
+                  onOpen={openPack}
+                />
+              ))}
+            </ScrollView>
+          </Section>
+        ) : null}
+
+        {!packs.isLoading && watches.length > 0 ? (
+          <Section
+            actionLabel="See all"
+            title="Watch packs"
+            onAction={() => openCategoryShelf("WATCH")}
+          >
+            <ScrollView horizontal contentContainerStyle={styles.rail} showsHorizontalScrollIndicator={false}>
+              {watches.map((pack) => (
+                <HomePackTile
+                  key={pack.id}
+                  artHeight={packArtHeight}
+                  pack={pack}
+                  width={packTileWidth}
+                  onOpen={openPack}
+                />
+              ))}
+            </ScrollView>
+          </Section>
+        ) : null}
+
+        {packs.data && packs.data.length === 0 && !packs.isLoading ? (
+          <EmptyState icon="cube-outline" title="Nothing is on the shelf right now." />
+        ) : null}
 
         {sealedPacks.length > 0 ? (
           <ContinueOpening
@@ -168,30 +264,6 @@ export function ShelfScreen() {
               purchasedPackIds: sealedPacks.map((pack) => pack.purchasedPackId),
             })}
           />
-        ) : null}
-
-        {packs.isLoading ? (
-          <Section title="Featured packs">
-            <ScrollView horizontal contentContainerStyle={styles.rail} showsHorizontalScrollIndicator={false}>
-              <HomeRailSkeleton />
-            </ScrollView>
-          </Section>
-        ) : showcase.length > 0 ? (
-          <Section
-            actionLabel="See all"
-            title="Featured packs"
-            onAction={() => navigation.navigate("Tabs", { screen: "Packs" })}
-          >
-            <ScrollView horizontal contentContainerStyle={styles.rail} showsHorizontalScrollIndicator={false}>
-              {showcase.map((pack) => (
-                <HomePackTile key={pack.id} pack={pack} onOpen={openPack} />
-              ))}
-            </ScrollView>
-          </Section>
-        ) : null}
-
-        {packs.data && packs.data.length === 0 && !packs.isLoading ? (
-          <EmptyState icon="cube-outline" title="Nothing is on the shelf right now." />
         ) : null}
 
         {recent.length > 0 ? (
@@ -207,6 +279,8 @@ export function ShelfScreen() {
             </ScrollView>
           </Section>
         ) : null}
+
+        <WalletSummary onDeposit={() => navigation.navigate("Wallet")} />
 
         {totals ? (
           <PortfolioSnapshot
@@ -328,7 +402,8 @@ function RecentTile({ item }: { item: OwnedHolding }) {
     <View style={styles.recent}>
       <CollectibleArt
         category={item.category}
-        height={120}
+        fit="contain"
+        height={148}
         imageUrl={item.imageUrl}
         title={item.name}
       />
@@ -368,10 +443,14 @@ function Section({
   );
 }
 
-function showcasePacks(packs: ShelfPack[]): ShelfPack[] {
-  const featured = featuredPacks(packs);
+function showcasePacks(packs: ShelfPack[], category: ShelfPack["category"]): ShelfPack[] {
+  const matched = packs.filter((pack) => pack.category === category);
+  if (category !== "TRADING_CARD") {
+    return matched;
+  }
+  const featured = featuredPacks(matched);
   const seen = new Set(featured.map((pack) => pack.id));
-  return [...featured, ...packs.filter((pack) => !seen.has(pack.id))];
+  return [...featured, ...matched.filter((pack) => !seen.has(pack.id))];
 }
 
 function isRarity(value: string): value is Rarity {
@@ -407,9 +486,7 @@ const styles = StyleSheet.create({
   wallet: {
     alignItems: "center",
     backgroundColor: colors.surfacePrimary,
-    borderColor: colors.borderSubtle,
     borderRadius: radius.card,
-    borderWidth: 1,
     flexDirection: "row",
     gap: spacing.md,
     paddingHorizontal: layout.cardPadding,
@@ -429,9 +506,7 @@ const styles = StyleSheet.create({
   continue: {
     alignItems: "center",
     backgroundColor: colors.accent.muted,
-    borderColor: colors.accent.border,
     borderRadius: radius.card,
-    borderWidth: 1,
     flexDirection: "row",
     gap: spacing.md,
     padding: layout.cardPadding,
@@ -454,7 +529,7 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   rail: {
-    gap: spacing.md,
+    gap: catalogGrid.gap,
     paddingRight: layout.screenPadding,
   },
   stack: {
@@ -463,9 +538,7 @@ const styles = StyleSheet.create({
   dropRow: {
     alignItems: "center",
     backgroundColor: colors.surfacePrimary,
-    borderColor: colors.borderSubtle,
     borderRadius: radius.card,
-    borderWidth: 1,
     flexDirection: "row",
     gap: spacing.md,
     minHeight: layout.minTouchTarget,
@@ -484,11 +557,9 @@ const styles = StyleSheet.create({
   },
   recent: {
     backgroundColor: colors.surfacePrimary,
-    borderColor: colors.borderSubtle,
     borderRadius: radius.card,
-    borderWidth: 1,
     overflow: "hidden",
-    width: 168,
+    width: 176,
   },
   recentInfo: {
     gap: spacing.xxs,
@@ -501,9 +572,7 @@ const styles = StyleSheet.create({
   },
   snapshot: {
     backgroundColor: colors.surfacePrimary,
-    borderColor: colors.borderSubtle,
     borderRadius: radius.card,
-    borderWidth: 1,
     gap: spacing.xs,
     padding: layout.cardPadding,
   },

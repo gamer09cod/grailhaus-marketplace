@@ -1,0 +1,10 @@
+import { strict as assert } from "node:assert";
+import { cardAnnouncement, gestureFreeOpening, spokenCents } from "../app/src/features/reveal/access.ts";
+assert.equal(gestureFreeOpening(false, false), false);
+assert.equal(gestureFreeOpening(true, false), true);
+assert.equal(gestureFreeOpening(false, true), true);
+assert.equal(cardAnnouncement({ name: "Eclipse Sovereign", rarity: "RARE", estimatedValueCents: 12000n }), "Rare card revealed. Eclipse Sovereign. Estimated value 120 dollars.");
+assert.equal(spokenCents(101n), "1 dollar and 1 cent");
+assert.equal(spokenCents(-50n), "minus 50 cents");
+assert.equal(spokenCents(0n), "0 dollars");
+console.log("REVEAL_ACCESS_OK");

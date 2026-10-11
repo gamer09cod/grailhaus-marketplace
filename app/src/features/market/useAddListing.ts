@@ -9,7 +9,7 @@ import type { AppStackParamList } from "../../navigation/types";
 import { useOnline } from "../shelf/useOnline";
 import type { MarketListing } from "./board";
 
-export type AddListingAfter = "stay" | "review";
+export type AddListingAfter = "stay" | "checkout";
 
 export function useAddListing() {
   const navigation = useNavigation<NativeStackNavigationProp<AppStackParamList>>();
@@ -40,9 +40,9 @@ export function useAddListing() {
       addKey.current = null;
       setUnknown(false);
       queryClient.setQueryData(["cart"], snapshot);
-      if (after === "review") {
+      if (after === "checkout") {
         setNotice(null);
-        navigation.navigate("Cart", { startReview: true });
+        navigation.navigate("Cart");
         return;
       }
       setNotice("Added to cart.");

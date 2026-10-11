@@ -23,7 +23,7 @@ declare
   pack_state text;
   listing_state text;
 begin
-  select id into catalog_id from public.catalog_items where name = 'Harbor Fox';
+  select id into catalog_id from public.catalog_items where name = 'Emberkin';
   select id into starter from public.pack_skus where category = 'TRADING_CARD' and name = 'Starter Pack';
 
   insert into public.owned_items (owner_id, catalog_item_id, source_type, acquisition_price_cents)

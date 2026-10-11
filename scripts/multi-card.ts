@@ -1,0 +1,36 @@
+import { strict as assert } from "node:assert";
+import { cardPresentationKey, decorBackCount, nextCardIndex, previousCardPositions } from "../app/src/features/reveal/multiCard.ts";
+import { revealTransition } from "../app/src/features/reveal/revealMachine.ts";
+import { cardsInStoredOrder } from "../app/src/features/reveal/tear.ts";
+
+const input = [{ revealOrder: 3, rarity: "LEGENDARY" }, { revealOrder: 1, rarity: "EPIC" }, { revealOrder: 2, rarity: "COMMON" }];
+const cards = cardsInStoredOrder(input);
+assert.deepEqual(cards.map((card) => card.rarity), ["EPIC", "COMMON", "LEGENDARY"], "stored order wins over client rarity ranking");
+assert.equal(input[0]?.revealOrder, 3, "source must not be mutated");
+assert.equal(nextCardIndex(0, 1), null);
+assert.equal(nextCardIndex(0, 0), null);
+assert.equal(nextCardIndex(-1, 3), null);
+assert.equal(nextCardIndex(0, 3), 1);
+assert.equal(nextCardIndex(1, 3), 2);
+assert.equal(nextCardIndex(2, 3), null);
+assert.notEqual(cardPresentationKey("pack", 0), cardPresentationKey("pack", 1));
+assert.deepEqual(previousCardPositions(0), []);
+assert.deepEqual(previousCardPositions(1), [0]);
+assert.deepEqual(previousCardPositions(4), [2, 3]);
+// Décor backs are presentation-only — one server card still yields anonymous backs.
+assert.equal(decorBackCount(1, false), 2);
+assert.equal(decorBackCount(1, true), 0);
+assert.equal(decorBackCount(3, false), 2);
+assert.equal(decorBackCount(5, false), 3);
+assert.equal(decorBackCount(0, false), 0);
+assert.equal(revealTransition("SEALED", { type: "NEXT_CARD" }), "SEALED");
+assert.equal(revealTransition("FINAL_REVEAL", { type: "NEXT_CARD" }), "FINAL_REVEAL");
+let state = revealTransition("CARD_REVEALED", { type: "NEXT_CARD" });
+assert.equal(state, "CARD_ENTER", "next card must bypass the pack tear");
+state = revealTransition(state, { type: "BEGIN_SUSPENSE" });
+assert.equal(state, "REVEALING_CARD");
+state = revealTransition(state, { type: "BEGIN_FINAL_REVEAL" });
+state = revealTransition(state, { type: "COMPLETE_REVEAL" });
+assert.equal(state, "CARD_REVEALED");
+assert.equal(revealTransition(state, { type: "COMPLETE_PACK" }), "PACK_COMPLETE");
+console.log("MULTI_CARD_OK");

@@ -2,7 +2,7 @@ import { memo } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import { CollectibleArt } from "../../components/CollectibleArt";
-import { colors, layout, maxFontScale, radius, spacing, typography, usePressMotion } from "../../theme";
+import { colors, maxFontScale, radius, spacing, typography, usePressMotion } from "../../theme";
 import { formatCents } from "../../utils/money";
 import { isRarity, rarityLabel } from "../shelf/packs";
 import type { OwnedHolding } from "./inventory";
@@ -21,6 +21,7 @@ export const HoldingCard = memo(function HoldingCard({ holding, artHeight, width
   const profit = profitCents(holding.estimatedValueCents, holding.acquisitionPriceCents);
   const percent = allTimePercentLabel(holding.estimatedValueCents, holding.acquisitionPriceCents);
   const listed = holding.state === "LISTED";
+  const gain = profit >= 0n;
   const a11y = [
     holding.name,
     rarity,
@@ -44,12 +45,13 @@ export const HoldingCard = memo(function HoldingCard({ holding, artHeight, width
       <CollectibleArt
         category={holding.category}
         height={artHeight}
+        fit="contain"
         imageUrl={holding.imageUrl}
         overlay={
           listed ? (
             <View pointerEvents="none" style={styles.badge}>
               <View style={styles.listedFill}>
-                <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.listedLabel}>LISTED</Text>
+                <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.listedLabel}>Listed</Text>
               </View>
             </View>
           ) : null
@@ -58,21 +60,25 @@ export const HoldingCard = memo(function HoldingCard({ holding, artHeight, width
         title={holding.name}
       />
       <View style={styles.info}>
+        <Text maxFontSizeMultiplier={maxFontScale.display} style={styles.value}>
+          {formatCents(holding.estimatedValueCents)}
+        </Text>
         <Text maxFontSizeMultiplier={maxFontScale.body} numberOfLines={2} style={styles.name}>
           {holding.name}
         </Text>
         <Text maxFontSizeMultiplier={maxFontScale.body} numberOfLines={1} style={styles.meta}>
           {rarity}
         </Text>
-        <Text maxFontSizeMultiplier={maxFontScale.display} style={styles.value}>
-          {formatCents(holding.estimatedValueCents)}
-        </Text>
-        <Text maxFontSizeMultiplier={maxFontScale.body} numberOfLines={1} style={styles.meta}>
+        <Text
+          maxFontSizeMultiplier={maxFontScale.body}
+          numberOfLines={1}
+          style={[styles.pnl, gain ? styles.pnlUp : styles.pnlDown]}
+        >
           {formatSignedCents(profit)}{percent ? ` · ${percent}` : ""}
         </Text>
         {listed && holding.listingPriceCents !== null ? (
           <Text maxFontSizeMultiplier={maxFontScale.body} numberOfLines={1} style={styles.listedPrice}>
-            {formatCents(holding.listingPriceCents)}
+            Ask {formatCents(holding.listingPriceCents)}
           </Text>
         ) : null}
       </View>
@@ -117,38 +123,46 @@ const styles = StyleSheet.create({
     top: spacing.sm,
   },
   listedFill: {
-    backgroundColor: colors.status.warning.muted,
-    borderColor: colors.status.warning.border,
+    backgroundColor: colors.accent.muted,
+    borderColor: colors.accent.border,
     borderRadius: radius.sm,
     borderWidth: 1,
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xxs,
   },
   listedLabel: {
-    ...typography.caption,
-    color: colors.status.warning.solid,
+    ...typography.label,
+    color: colors.accent.solid,
+    fontSize: 10,
   },
   info: {
     gap: spacing.xxs,
-    padding: spacing.md,
-  },
-  name: {
-    ...typography.bodyMedium,
-    color: colors.textPrimary,
-    minHeight: layout.minTouchTarget - 12,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
   },
   value: {
-    ...typography.moneySmall,
+    ...typography.money,
     color: colors.textPrimary,
-    marginTop: spacing.xs,
+  },
+  name: {
+    ...typography.productTitle,
+    color: colors.textPrimary,
   },
   meta: {
     ...typography.caption,
     color: colors.textSecondary,
   },
+  pnl: {
+    ...typography.caption,
+  },
+  pnlUp: {
+    color: colors.status.success.solid,
+  },
+  pnlDown: {
+    color: colors.status.error.solid,
+  },
   listedPrice: {
     ...typography.caption,
-    color: colors.textSecondary,
-    marginTop: spacing.xs,
+    color: colors.textTertiary,
   },
 });

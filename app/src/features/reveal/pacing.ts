@@ -15,8 +15,8 @@ const rarityRank: Record<string, number> = {
 };
 
 /** Position is 1-based in the purchase. The first two packs stay on the full gesture. */
-export function openMode(position: number, rarity: string): OpenMode {
-  if (!Number.isInteger(position) || position <= 2) {
+export function openMode(position: number, rarity: string, fastRequested = true): OpenMode {
+  if (!Number.isInteger(position) || position <= 2 || !fastRequested) {
     return "full";
   }
   if (rarity === "EPIC" || rarity === "LEGENDARY") {

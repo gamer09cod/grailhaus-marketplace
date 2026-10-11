@@ -32,7 +32,7 @@ export function DropCard({ board, drop, onOpen, onAction }: DropCardProps) {
         onPress={onOpen}
         style={({ pressed }) => [styles.body, pressed ? styles.pressed : null, pressMotion(pressed)]}
       >
-        <CollectibleArt category={drop.category} height={148} style={styles.art} title={drop.name} />
+        <CollectibleArt category={drop.category} fit="contain" height={148} style={styles.art} title={drop.name} />
         <View style={styles.info}>
           <DropStatus board={board} drop={drop} />
           <Text maxFontSizeMultiplier={maxFontScale.body} numberOfLines={2} style={styles.name}>
@@ -70,16 +70,13 @@ function statusSummary(drop: TimedDrop): string {
 const styles = StyleSheet.create({
   card: {
     backgroundColor: colors.surfacePrimary,
-    borderColor: colors.borderSubtle,
     borderRadius: radius.card,
-    borderWidth: 1,
     gap: spacing.md,
     overflow: "hidden",
     paddingBottom: layout.cardPadding,
     ...shadows.low,
   },
   liveCard: {
-    borderColor: colors.accent.border,
     ...glow(colors.accent.brand, 14),
   },
   body: {

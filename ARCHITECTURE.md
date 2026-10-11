@@ -57,3 +57,6 @@ A wallet cannot go negative, and a wallet that does not match its ledger cannot 
 ## Scope cuts
 
 Sneaker and watch packs do not use the card tear. The admin screen is numbers only. There is no catalog search and no visual effects outside the reveal. Redis, background workers, and a separate API are out. The release APK from `npm run apk` uses the hosted project.
+
+
+Catalog presentation uses five evergreen tiers per category with a separate timed drop. Additional choices reuse validated rarity pools without changing existing purchase history. Original card, pack, sneaker and watch artwork is bundled in the app (40 JPEG assets, about 14.3 MB) through a shared resolver; remote catalog URLs override local art with fallback on failure. Image selection is cosmetic and cannot alter stored contents, rarity or financial settlement.

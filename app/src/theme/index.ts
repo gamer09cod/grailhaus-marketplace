@@ -13,6 +13,10 @@ import {
 } from "./motion";
 import { radius } from "./radius";
 import { glow, shadows } from "./shadows";
+import { catalogGrid } from "./catalogGrid";
+import { buttonSize, iconSize, touchTarget } from "./controlSizes";
+import { fontFamily } from "./fonts";
+import { catalogSourcePx, imageAspect, revealCardFrame } from "./imageAspect";
 import { layout, spacing } from "./spacing";
 import { fontWeight, maxFontScale, typography } from "./typography";
 
@@ -33,6 +37,12 @@ export { radius } from "./radius";
 export type { RadiusKey } from "./radius";
 export { glow, shadows } from "./shadows";
 export type { ShadowKey } from "./shadows";
+export { catalogGrid, catalogTileMetrics } from "./catalogGrid";
+export { buttonSize, iconSize, touchTarget } from "./controlSizes";
+export type { ButtonSizeKey, IconSizeKey } from "./controlSizes";
+export { fontFamily, manropeFonts } from "./fonts";
+export { catalogSourcePx, imageAspect, revealCardFrame } from "./imageAspect";
+export type { ImageAspectKey } from "./imageAspect";
 export { layout, spacing } from "./spacing";
 export type { SpacingKey } from "./spacing";
 export { fontWeight, maxFontScale, typography } from "./typography";
@@ -45,6 +55,14 @@ export const theme = {
   colors,
   spacing,
   layout,
+  catalogGrid,
+  imageAspect,
+  revealCardFrame,
+  catalogSourcePx,
+  buttonSize,
+  iconSize,
+  touchTarget,
+  fontFamily,
   typography,
   fontWeight,
   maxFontScale,

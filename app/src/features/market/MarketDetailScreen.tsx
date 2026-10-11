@@ -114,7 +114,8 @@ export function MarketDetailScreen() {
           <View style={styles.body}>
             <CollectibleArt
               category={listing.category}
-              height={220}
+              fit="contain"
+              height={280}
               imageUrl={listing.imageUrl}
               title={listing.name}
             />
@@ -224,7 +225,7 @@ export function MarketDetailScreen() {
                 fullWidth
                 label="Buy Now"
                 motion="financial"
-                onPress={() => add.addListing(listing, true, "review")}
+                onPress={() => add.addListing(listing, true, "checkout")}
               />
             </>
           )}
@@ -322,9 +323,7 @@ const styles = StyleSheet.create({
   },
   card: {
     backgroundColor: colors.surfacePrimary,
-    borderColor: colors.borderSubtle,
     borderRadius: radius.card,
-    borderWidth: 1,
     gap: spacing.md,
     padding: layout.cardPadding,
   },

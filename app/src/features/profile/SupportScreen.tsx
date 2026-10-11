@@ -10,7 +10,7 @@ const topics: { title: string; body: string }[] = [
   },
   {
     title: "Buying",
-    body: "Packs and listings check out together. Review Purchase does not charge. Confirm Purchase does.",
+    body: "Packs and listings check out together. Pay on the cart charges your wallet once.",
   },
   {
     title: "Selling",
@@ -60,9 +60,7 @@ const styles = StyleSheet.create({
   },
   card: {
     backgroundColor: colors.surfacePrimary,
-    borderColor: colors.borderSubtle,
     borderRadius: radius.card,
-    borderWidth: 1,
     gap: spacing.xs,
     padding: layout.cardPadding,
   },

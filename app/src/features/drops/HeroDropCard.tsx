@@ -39,6 +39,7 @@ export function HeroDropCard({ board, drop, onPress }: HeroDropCardProps) {
       <CollectibleArt
         category={drop.category}
         height={260}
+        fit="contain"
         overlay={
           <View style={styles.overlay}>
             {live ? (
@@ -86,14 +87,12 @@ export function HeroDropCard({ board, drop, onPress }: HeroDropCardProps) {
 
 const styles = StyleSheet.create({
   card: {
-    borderColor: colors.borderSubtle,
     borderRadius: radius.card,
-    borderWidth: 1,
+    overflow: "hidden",
     ...shadows.medium,
   },
   liveCard: {
-    borderColor: colors.accent.border,
-    ...glow(colors.accent.brand, 16),
+    ...glow(colors.accent.brand, 18),
   },
   pressed: {
     opacity: 0.92,

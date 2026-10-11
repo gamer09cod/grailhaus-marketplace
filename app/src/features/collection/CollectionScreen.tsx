@@ -25,7 +25,7 @@ import { EmptyState } from "../../components/EmptyState";
 import { ErrorState } from "../../components/ErrorState";
 import { HoldingGridSkeleton } from "../../components/Skeleton";
 import type { AppStackParamList } from "../../navigation/types";
-import { colors, layout, maxFontScale, radius, spacing, typography } from "../../theme";
+import { colors, imageAspect, layout, maxFontScale, radius, spacing, typography } from "../../theme";
 import { formatCents } from "../../utils/money";
 import { categoryLabel } from "../shelf/packs";
 import { HoldingCard } from "./HoldingCard";
@@ -130,17 +130,20 @@ export function CollectionScreen() {
   const showFilters = items.length > 0;
   const columnGap = spacing.md;
   const cardWidth = (width - layout.screenPadding * 2 - columnGap) / 2;
-  const artHeight = Math.round(cardWidth * 0.72);
+  const artHeight = Math.round(cardWidth * imageAspect.holdingPortrait);
 
   const header = (
     <View style={styles.header}>
       {totals && items.length > 0 ? (
         <View style={styles.summary}>
-          <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.kicker}>Portfolio</Text>
+          <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.kicker}>Collection value</Text>
           <Text maxFontSizeMultiplier={maxFontScale.display} style={styles.total}>
             {formatCents(totals.valueCents)}
           </Text>
-          <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.pnl}>
+          <Text
+            maxFontSizeMultiplier={maxFontScale.body}
+            style={[styles.pnl, totals.profitCents >= 0n ? styles.pnlUp : styles.pnlDown]}
+          >
             {formatSignedCents(totals.profitCents)}
             {allTimePercent ? ` · ${allTimePercent} all-time` : " all-time"}
           </Text>
@@ -149,7 +152,7 @@ export function CollectionScreen() {
 
       {allocation.length > 1 ? (
         <View style={styles.section}>
-          <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.sectionTitle}>Category Allocation</Text>
+          <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.sectionTitle}>Allocation</Text>
           {allocation.map((row) => (
             <View key={row.category} style={styles.allocRow}>
               <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.allocLabel}>{row.label}</Text>
@@ -172,7 +175,7 @@ export function CollectionScreen() {
 
       {gainers.length > 0 ? (
         <View style={styles.section}>
-          <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.sectionTitle}>Top Gainers</Text>
+          <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.sectionTitle}>Top gainers</Text>
           {gainers.map((holding) => {
             const profit = profitCents(holding.estimatedValueCents, holding.acquisitionPriceCents);
             const percent = allTimePercentLabel(holding.estimatedValueCents, holding.acquisitionPriceCents);
@@ -184,6 +187,14 @@ export function CollectionScreen() {
                 onPress={() => openListing(holding.ownedItemId)}
                 style={({ pressed }) => [styles.gainer, pressed ? styles.pressed : null]}
               >
+                <CollectibleArt
+                  category={holding.category}
+                  fit="contain"
+                  height={48}
+                  imageUrl={holding.imageUrl}
+                  style={styles.gainerArt}
+                  title={holding.name}
+                />
                 <Text maxFontSizeMultiplier={maxFontScale.body} numberOfLines={1} style={styles.gainerName}>
                   {holding.name}
                 </Text>
@@ -248,7 +259,7 @@ export function CollectionScreen() {
 
   return (
     <View style={styles.screen}>
-      <AppHeader cart title="Portfolio" />
+      <AppHeader cart title="My Collection" />
       {showFilters ? (
         <View style={styles.filters}>
           <ChipGroup accessibilityLabel="Portfolio category">
@@ -341,9 +352,9 @@ function EmptyCollection({
       body="Open your first pack or purchase a collectible from the market."
       illustration={
         <View style={styles.emptyStage}>
-          <CollectibleArt category="TRADING_CARD" height={88} style={styles.emptyTile} title="Cards" />
-          <CollectibleArt category="SNEAKER" height={88} style={styles.emptyTile} title="Sneakers" />
-          <CollectibleArt category="WATCH" height={88} style={styles.emptyTile} title="Watches" />
+          <CollectibleArt category="TRADING_CARD" fit="contain" height={88} style={styles.emptyTile} title="Emberkin" />
+          <CollectibleArt category="SNEAKER" fit="contain" height={88} style={styles.emptyTile} title="Nike Dunk Low Panda" />
+          <CollectibleArt category="WATCH" fit="contain" height={88} style={styles.emptyTile} title="Casio G-Shock GA2100" />
         </View>
       }
       primaryAction={{ label: "Explore Packs", onPress: onExplorePacks }}
@@ -383,7 +394,12 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   summary: {
+    backgroundColor: colors.surfacePrimary,
+    borderColor: colors.borderSubtle,
+    borderRadius: radius.card,
+    borderWidth: 1,
     gap: spacing.xs,
+    padding: layout.cardPadding,
   },
   kicker: {
     ...typography.label,
@@ -394,15 +410,22 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
   },
   pnl: {
-    ...typography.body,
-    color: colors.textSecondary,
+    ...typography.bodyMedium,
+  },
+  pnlUp: {
+    color: colors.status.success.solid,
+  },
+  pnlDown: {
+    color: colors.status.error.solid,
   },
   section: {
     gap: spacing.sm,
   },
   sectionTitle: {
-    ...typography.heading,
+    ...typography.sectionTitle,
     color: colors.textPrimary,
+    fontSize: 18,
+    lineHeight: 24,
   },
   allocRow: {
     alignItems: "center",
@@ -432,11 +455,20 @@ const styles = StyleSheet.create({
     textAlign: "right",
   },
   gainer: {
+    alignItems: "center",
+    backgroundColor: colors.surfacePrimary,
+    borderColor: colors.borderSubtle,
+    borderRadius: radius.card,
+    borderWidth: 1,
     flexDirection: "row",
     gap: spacing.md,
-    justifyContent: "space-between",
     minHeight: layout.minTouchTarget,
-    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.sm,
+  },
+  gainerArt: {
+    borderRadius: radius.sm,
+    width: 48,
   },
   gainerName: {
     ...typography.bodyMedium,
@@ -445,7 +477,7 @@ const styles = StyleSheet.create({
   },
   gainerPnl: {
     ...typography.moneySmall,
-    color: colors.textSecondary,
+    color: colors.status.success.solid,
   },
   sealed: {
     alignItems: "center",

@@ -2,7 +2,7 @@ import { memo } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import { CollectibleArt } from "../../components/CollectibleArt";
-import { colors, layout, maxFontScale, radius, spacing, typography, usePressMotion } from "../../theme";
+import { colors, maxFontScale, radius, spacing, typography, usePressMotion } from "../../theme";
 import { formatCents } from "../../utils/money";
 import { rarityLabel } from "../shelf/packs";
 import type { MarketListing } from "./board";
@@ -30,6 +30,7 @@ export const MarketplaceItemCard = memo(function MarketplaceItemCard({
   const fmv = listing.currentValueCents !== null ? formatCents(listing.currentValueCents) : null;
   const delta = marketDeltaLabel(listing.priceCents, listing.currentValueCents);
   const tone = rarity ? colors.rarity[rarity] : null;
+  const deltaTone = deltaToneFor(listing.priceCents, listing.currentValueCents);
   const a11y = [
     listing.name,
     rarityText,
@@ -50,45 +51,61 @@ export const MarketplaceItemCard = memo(function MarketplaceItemCard({
     >
       <CollectibleArt
         category={listing.category}
+        fit="contain"
         height={artHeight}
         imageUrl={listing.imageUrl}
         overlay={
-          tone ? (
-            <View pointerEvents="none" style={styles.badge}>
+          <View pointerEvents="none" style={styles.badgeRow}>
+            {tone ? (
               <View style={[styles.badgeFill, { backgroundColor: tone.muted, borderColor: tone.border }]}>
                 <Text maxFontSizeMultiplier={maxFontScale.body} style={[styles.badgeLabel, { color: tone.solid }]}>
                   {rarityText}
                 </Text>
               </View>
-            </View>
-          ) : null
+            ) : null}
+            {listing.isOwn ? (
+              <View style={styles.ownBadge}>
+                <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.ownBadgeLabel}>Yours</Text>
+              </View>
+            ) : null}
+          </View>
         }
         style={styles.art}
         title={listing.name}
       />
       <View style={styles.info}>
+        <Text maxFontSizeMultiplier={maxFontScale.display} style={styles.price}>{price}</Text>
         <Text maxFontSizeMultiplier={maxFontScale.body} numberOfLines={2} style={styles.name}>
           {listing.name}
         </Text>
-        <Text maxFontSizeMultiplier={maxFontScale.display} style={styles.price}>{price}</Text>
         {fmv ? (
           <Text maxFontSizeMultiplier={maxFontScale.body} numberOfLines={1} style={styles.meta}>
             FMV {fmv}
           </Text>
         ) : null}
         {delta ? (
-          <Text maxFontSizeMultiplier={maxFontScale.body} numberOfLines={1} style={styles.meta}>{delta}</Text>
+          <Text
+            maxFontSizeMultiplier={maxFontScale.body}
+            numberOfLines={1}
+            style={[styles.delta, deltaTone === "up" ? styles.deltaUp : deltaTone === "down" ? styles.deltaDown : null]}
+          >
+            {delta}
+          </Text>
         ) : null}
         {listedLabel ? (
           <Text maxFontSizeMultiplier={maxFontScale.body} numberOfLines={1} style={styles.meta}>{listedLabel}</Text>
-        ) : null}
-        {listing.isOwn ? (
-          <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.own}>Your listing</Text>
         ) : null}
       </View>
     </Pressable>
   );
 }, marketCardPropsEqual);
+
+function deltaToneFor(price: bigint, fmv: bigint | null): "up" | "down" | null {
+  if (fmv === null || fmv === 0n || price === fmv) {
+    return null;
+  }
+  return price < fmv ? "down" : "up";
+}
 
 function marketCardPropsEqual(prev: MarketplaceItemCardProps, next: MarketplaceItemCardProps): boolean {
   return (
@@ -122,9 +139,13 @@ const styles = StyleSheet.create({
   art: {
     borderRadius: 0,
   },
-  badge: {
+  badgeRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.xs,
     left: spacing.sm,
     position: "absolute",
+    right: spacing.sm,
     top: spacing.sm,
   },
   badgeFill: {
@@ -136,27 +157,43 @@ const styles = StyleSheet.create({
   badgeLabel: {
     ...typography.caption,
   },
+  ownBadge: {
+    backgroundColor: colors.surfaceElevated,
+    borderColor: colors.borderStrong,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xxs,
+  },
+  ownBadgeLabel: {
+    ...typography.caption,
+    color: colors.textSecondary,
+  },
   info: {
     gap: spacing.xxs,
-    padding: spacing.md,
-  },
-  name: {
-    ...typography.bodyMedium,
-    color: colors.textPrimary,
-    minHeight: layout.minTouchTarget - 12,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
   },
   price: {
-    ...typography.moneySmall,
+    ...typography.money,
     color: colors.textPrimary,
-    marginTop: spacing.xs,
+  },
+  name: {
+    ...typography.productTitle,
+    color: colors.textPrimary,
   },
   meta: {
     ...typography.caption,
     color: colors.textSecondary,
   },
-  own: {
+  delta: {
     ...typography.caption,
     color: colors.textSecondary,
-    marginTop: spacing.xs,
+  },
+  deltaDown: {
+    color: colors.status.success.solid,
+  },
+  deltaUp: {
+    color: colors.status.error.solid,
   },
 });

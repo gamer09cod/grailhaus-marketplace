@@ -3,9 +3,9 @@ export const radius = {
   /** Thumbnails and small badges. */
   sm: 8,
   chip: 10,
-  button: 12,
-  card: 16,
-  modal: 20,
+  button: 14,
+  card: 20,
+  modal: 22,
   bottomSheet: 24,
   /** Avatars and status dots only. Not for buttons or chips. */
   full: 999,

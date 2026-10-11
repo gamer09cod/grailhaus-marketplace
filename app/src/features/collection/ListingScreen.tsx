@@ -15,6 +15,7 @@ import {
 import { ListingRejected, ListingUnknown, loadListingQuote, submitListing } from "../../api/listing";
 import { AppHeader } from "../../components/AppHeader";
 import { AppBottomSheet } from "../../components/AppBottomSheet";
+import { CollectibleArt } from "../../components/CollectibleArt";
 import { ConnectivityBanner } from "../../components/ConnectivityBanner";
 import { InlineStatusCard } from "../../components/InlineStatusCard";
 import { RecoveryAction } from "../../components/RecoveryAction";
@@ -132,6 +133,14 @@ export function ListingScreen() {
         ) : null}
         {holding ? (
           <View style={styles.detail}>
+            <CollectibleArt
+              category={holding.category}
+              fit="contain"
+              height={220}
+              imageUrl={holding.imageUrl}
+              style={styles.art}
+              title={holding.name}
+            />
             <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.category}>
               {categoryLabel(holding.category)}
             </Text>
@@ -340,6 +349,9 @@ const styles = StyleSheet.create({
   },
   detail: {
     gap: spacing.xs,
+  },
+  art: {
+    marginBottom: spacing.sm,
   },
   category: {
     ...typography.label,

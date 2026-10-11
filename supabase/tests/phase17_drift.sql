@@ -101,13 +101,13 @@ begin
   select item.base_value_cents, item.id, item.current_value_cents
     into finch_base, finch_id, finch_value
   from public.catalog_items item
-  where item.name = 'Cedar Finch';
+  where item.name = 'Gust Finch';
   if finch_value is distinct from public.drifted_value_cents(
     finch_id,
     finch_base,
     (first_pass ->> 'bucket')::bigint
   ) then
-    raise exception 'Cedar Finch did not use the stored walk';
+    raise exception 'Gust Finch did not use the stored walk';
   end if;
 
   second_pass := public.apply_price_drift();
@@ -142,7 +142,7 @@ begin
     set local role authenticated;
     update public.catalog_items
     set current_value_cents = 1
-    where name = 'Cedar Finch';
+    where name = 'Gust Finch';
     raise exception 'a signed-in client wrote a collectible value';
   exception
     when insufficient_privilege then

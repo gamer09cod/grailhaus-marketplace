@@ -8,7 +8,6 @@ import type { IconName } from "../../components/Icon";
 import { DestructiveButton, PrimaryButton, SecondaryButton, TertiaryButton } from "../../components/buttons";
 import {
   colors,
-  layout,
   maxFontScale,
   radius,
   spacing,
@@ -26,6 +25,7 @@ type CartLineItemProps = {
   busy: boolean;
   disabled: boolean;
   compact?: boolean;
+  showDivider?: boolean;
   onAccept: () => void;
   onRemove: () => void;
   onRetry: () => void;
@@ -38,41 +38,52 @@ export function CartLineItem({
   busy,
   disabled,
   compact = false,
+  showDivider = false,
   onAccept,
   onRemove,
   onRetry,
   onBrowseMarket,
 }: CartLineItemProps) {
   const amount = formatCents(lineAmount(line));
-  const price = line.lineType === "PACK"
-    ? `${line.quantity} × ${formatCents(line.snapshotPriceCents)}`
-    : formatCents(line.snapshotPriceCents);
+  const unit = formatCents(line.snapshotPriceCents);
+  const current = formatCents(line.currentPriceCents);
+  const priceChanged = line.snapshotPriceCents !== line.currentPriceCents
+    && (line.state === "PRICE_CHANGED" || line.state === "LISTING_PRICE_CHANGED");
+  const qtyLabel = line.lineType === "PACK" ? `${line.quantity}` : "1";
+  const detail = line.lineType === "PACK"
+    ? `${line.tier} · ${unit}${line.quantity > 1 ? ` × ${line.quantity}` : ""}`
+    : `Seller ${line.sellerUsername}`;
 
   return (
-    <View style={styles.card}>
+    <View style={[styles.item, showDivider ? styles.itemDivider : null]}>
       <View style={styles.row}>
         <CollectibleArt
           category={line.category}
-          height={72}
+          height={80}
+          fit="contain"
           style={styles.art}
           title={line.name}
         />
         <View style={styles.copy}>
-          <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.kicker}>
-            {categoryLabel(line.category)}
-          </Text>
           <Text maxFontSizeMultiplier={maxFontScale.body} numberOfLines={2} style={styles.name}>
             {line.name}
           </Text>
-          {line.lineType === "PACK" ? (
-            <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.meta}>{line.tier}</Text>
+          <Text maxFontSizeMultiplier={maxFontScale.body} numberOfLines={1} style={styles.meta}>
+            {categoryLabel(line.category)} · {detail}
+          </Text>
+        </View>
+        <View style={styles.side}>
+          <View style={styles.qtyPill} accessibilityLabel={`Quantity ${qtyLabel}`}>
+            <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.qtyText}>{qtyLabel}</Text>
+          </View>
+          {priceChanged ? (
+            <View style={styles.priceStack}>
+              <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.strike}>{unit}</Text>
+              <Text maxFontSizeMultiplier={maxFontScale.display} style={styles.priceAlert}>{current}</Text>
+            </View>
           ) : (
-            <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.meta}>Seller {line.sellerUsername}</Text>
+            <Text maxFontSizeMultiplier={maxFontScale.display} style={styles.price}>{amount}</Text>
           )}
-          <Text maxFontSizeMultiplier={maxFontScale.display} style={styles.priceLine}>{price}</Text>
-          {line.lineType === "PACK" && line.quantity > 1 ? (
-            <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.amount}>{amount}</Text>
-          ) : null}
         </View>
       </View>
 
@@ -101,7 +112,7 @@ function LineStatus({
   onRemove,
   onRetry,
   onBrowseMarket,
-}: Omit<CartLineItemProps, "compact">) {
+}: Omit<CartLineItemProps, "compact" | "showDivider">) {
   const confirming = busy ? "Confirming…" : undefined;
   const removing = busy ? "Removing…" : "Remove";
 
@@ -159,9 +170,10 @@ function LineStatus({
       );
     }
     return (
-      <StatusBlock icon="pricetag-outline" title="Listing available" tone={colors.status.info}>
+      <View style={styles.availableRow}>
+        <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.available}>Listing available</Text>
         <TertiaryButton disabled={disabled} label={removing} motion="financial" size="sm" onPress={onRemove} />
-      </StatusBlock>
+      </View>
     );
   }
 
@@ -226,7 +238,11 @@ function LineStatus({
       />
     );
   }
-  return <TertiaryButton disabled={disabled} label={removing} motion="financial" size="sm" onPress={onRemove} />;
+  return (
+    <View style={styles.availableRow}>
+      <TertiaryButton disabled={disabled} label={removing} motion="financial" size="sm" onPress={onRemove} />
+    </View>
+  );
 }
 
 function HoldStatus({
@@ -252,14 +268,14 @@ function HoldStatus({
   const expiring = isHoldExpiring(expiresAt, serverNow, fetchedAtMs, nowMs);
   const hold = remainingLabel(expiresAt, serverNow, fetchedAtMs, nowMs);
   return (
-    <StatusBlock
-      icon="time-outline"
-      title={expiring ? "Expiring" : "Reserved"}
-      tone={expiring ? colors.status.warning : colors.status.info}
-    >
-      <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.countdown}>{hold}</Text>
+    <View style={styles.holdRow}>
+      <View style={styles.holdCopy}>
+        <Text maxFontSizeMultiplier={maxFontScale.body} style={expiring ? styles.holdWarn : styles.holdOk}>
+          {expiring ? "Expiring" : "Reserved"} · {hold}
+        </Text>
+      </View>
       <TertiaryButton disabled={disabled} label={busy ? "Removing…" : "Remove"} motion="financial" size="sm" onPress={onRemove} />
-    </StatusBlock>
+    </View>
   );
 }
 
@@ -282,13 +298,13 @@ function StatusBlock({
 }
 
 const styles = StyleSheet.create({
-  card: {
-    backgroundColor: colors.surfacePrimary,
-    borderColor: colors.borderSubtle,
-    borderRadius: radius.card,
-    borderWidth: 1,
-    gap: spacing.md,
-    padding: layout.cardPadding,
+  item: {
+    gap: spacing.sm,
+    paddingVertical: spacing.md,
+  },
+  itemDivider: {
+    borderTopColor: colors.borderSubtle,
+    borderTopWidth: 1,
   },
   row: {
     flexDirection: "row",
@@ -296,40 +312,84 @@ const styles = StyleSheet.create({
   },
   art: {
     borderRadius: radius.sm,
-    width: 72,
+    width: 80,
   },
   copy: {
     flex: 1,
     gap: spacing.xxs,
-  },
-  kicker: {
-    ...typography.label,
-    color: colors.textTertiary,
+    justifyContent: "center",
+    minWidth: 0,
   },
   name: {
-    ...typography.heading,
+    ...typography.bodyMedium,
     color: colors.textPrimary,
   },
   meta: {
-    ...typography.bodySmall,
+    ...typography.caption,
     color: colors.textSecondary,
   },
-  priceLine: {
-    ...typography.money,
-    color: colors.textPrimary,
-    marginTop: spacing.xs,
+  side: {
+    alignItems: "flex-end",
+    gap: spacing.xs,
   },
-  amount: {
+  qtyPill: {
+    alignItems: "center",
+    backgroundColor: colors.accent.muted,
+    borderRadius: radius.sm,
+    minWidth: 36,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  qtyText: {
+    ...typography.label,
+    color: colors.accent.solid,
+  },
+  priceStack: {
+    alignItems: "flex-end",
+    gap: spacing.xxs,
+  },
+  strike: {
+    ...typography.caption,
+    color: colors.textTertiary,
+    textDecorationLine: "line-through",
+  },
+  price: {
     ...typography.moneySmall,
+    color: colors.textPrimary,
+  },
+  priceAlert: {
+    ...typography.moneySmall,
+    color: colors.status.warning.solid,
+  },
+  availableRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  available: {
+    ...typography.caption,
     color: colors.textSecondary,
+  },
+  holdRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.sm,
+    justifyContent: "space-between",
+  },
+  holdCopy: {
+    flex: 1,
+  },
+  holdOk: {
+    ...typography.caption,
+    color: colors.status.info.solid,
+  },
+  holdWarn: {
+    ...typography.caption,
+    color: colors.status.warning.solid,
   },
   statusBody: {
     ...typography.bodySmall,
     color: colors.textSecondary,
-  },
-  countdown: {
-    ...typography.countdown,
-    color: colors.textPrimary,
   },
   priceShift: {
     ...typography.money,

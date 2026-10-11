@@ -5,13 +5,14 @@ export const spacing = {
   sm: 8,
   md: 12,
   base: 16,
+  cozy: 20,
   lg: 24,
   xl: 32,
   xxl: 40,
 } as const;
 
 export const layout = {
-  screenPadding: spacing.base,
+  screenPadding: spacing.cozy,
   sectionGap: spacing.lg,
   sectionGapLarge: spacing.xl,
   cardPadding: spacing.base,

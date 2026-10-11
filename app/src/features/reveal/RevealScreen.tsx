@@ -1,611 +1,107 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useFocusEffect, useNavigation, useRoute } from "@react-navigation/native";
+import { useEffect, useMemo, useRef, type ReactNode } from "react";
+import { useNavigation, useRoute } from "@react-navigation/native";
 import type { RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AccessibilityInfo,
-  Animated,
-  AppState,
-  Easing,
-  PanResponder,
+  Pressable,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from "react-native";
 
-import {
-  loadRevealPack,
-  loadRevealSession,
-  RevealRejected,
-  submitReveal,
-  type RevealCard,
-  type RevealPack,
-} from "../../api/reveal";
+import type { RevealCard, RevealPack } from "../../api/reveal";
 import { AppHeader } from "../../components/AppHeader";
-import { CollectibleArt } from "../../components/CollectibleArt";
 import { ConnectivityBanner } from "../../components/ConnectivityBanner";
 import { ErrorState } from "../../components/ErrorState";
 import { InlineStatusCard } from "../../components/InlineStatusCard";
 import { RevealLoadSkeleton } from "../../components/Skeleton";
-import { PrimaryButton, TertiaryButton } from "../../components/buttons";
+import { PrimaryButton } from "../../components/buttons";
 import type { AppStackParamList } from "../../navigation/types";
-import { colors, glow, layout, maxFontScale, radius, shadows, spacing, typography, type RarityKey } from "../../theme";
+import { colors, layout, maxFontScale, radius, revealCardFrame, spacing, typography, type RarityKey } from "../../theme";
 import { formatCents } from "../../utils/money";
-import { useOnline } from "../shelf/useOnline";
 import {
   cardAnnouncement,
+  gestureFreeOpening,
   nextCardLabel,
-  revealMotion,
-  sealedDirection,
   spokenRarity,
   summaryAnnouncement,
 } from "./access";
-import { loadHapticsEnabled, playHaptic, playRarityHaptic, saveHapticsEnabled } from "./haptics";
-import { bestPull, fanInOpenOrder, openMode, packsOpenedLabel, sumCents, type OpenMode } from "./pacing";
-import { backgroundDuringTear, recoveryCursor, recoveryShowsCard } from "./recovery";
-import { anticipationMs, decideTear, isHighRarity, velocityPxPerMs } from "./tear";
+import { bestPull, fanInOpenOrder, packsOpenedLabel, sumCents } from "./pacing";
+import { RevealActions } from "./RevealActions";
+import { RevealResult, RevealFaceArtwork } from "./RevealResult";
+import { resultIsReady } from "./resultTiming";
+import { cardPresentationKey, nextCardIndex } from "./multiCard";
+import { PreviousCards } from "./PreviousCards";
+import { CardContinueGesture } from "./CardContinueGesture";
+import { CardStage } from "./CardStage";
+import { PackArtwork } from "./PackArtwork";
+import { PackStage } from "./PackStage";
+import { SliceGesture } from "./SliceGesture";
+import { TearPayoff } from "./TearPayoff";
+import { RevealBackground } from "./RevealBackground";
+import { SealedControls } from "./SealedControls";
+import { phaseBand } from "./revealPhases";
+import { canReplayReveal, canSkipReveal } from "./packRevealControls";
+import { revealStageLayout } from "./revealStageLayout";
+import { timingMode } from "./revealTiming";
+import { usePackReveal } from "./usePackReveal";
 
-const rareDots: { top?: number; bottom?: number; left?: number; right?: number; size: number }[] = [
-  { top: 28, left: 36, size: 4 },
-  { top: 64, right: 42, size: 3 },
-  { top: 120, left: 28, size: 5 },
-  { bottom: 88, right: 30, size: 3 },
-  { bottom: 48, left: 48, size: 4 },
-];
-
-type RevealPhase = "SEALED" | "DRAGGING" | "TEARING" | "OPEN" | "REVEALING_CARD" | "CARD_REVEALED" | "PACK_COMPLETE";
-
+/** Thin navigation shell — presentation + milestones live in usePackReveal. */
 export function RevealScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<AppStackParamList>>();
   const route = useRoute<RouteProp<AppStackParamList, "Reveal">>();
-  const packIds = route.params.purchasedPackIds;
-  const queryClient = useQueryClient();
-  const online = useOnline();
-  const sessionKey = ["reveal-session", packIds.join(",")] as const;
-  const session = useQuery({
-    queryKey: sessionKey,
-    queryFn: () => loadRevealSession(packIds),
+  const { height: windowHeight } = useWindowDimensions();
+  const stageLayout = useMemo(() => revealStageLayout(windowHeight), [windowHeight]);
+  const reveal = usePackReveal({ purchasedPackIds: route.params.purchasedPackIds });
+  const {
+    session, packs, loaded, cursor, summary, phase, sealReset, presentation, fastRequested,
+    screenReader, skipAnimation, reduced, notice, working, suspenseDurationMs,
+    cardIndex, readyPackId, speedUp, focused, foreground, online, suspense, finalBeat, cardEntrance,
+    finishFlip, finishSuspense, finishCardEntrance, finishTearPayoff, suspenseCue, revealImpact,
+    resultReady, speedUpSuspense, beginSeal, completeSeal, cancelSeal, sealTick, commitTear,
+    finishPack, resume, clearFastOpen, packRef,
+    resetReveal, replayReveal, skipReveal, quality, caps,
+  } = reveal;
+
+  const card = loaded?.cards[cardIndex];
+  const revealed = phase === "CARD_REVEALED" || phase === "PACK_COMPLETE";
+  const sleeveVisible = phase === "SEALED" || phase === "DRAGGING" || phase === "TEARING";
+  const animationPlaying = phase === "SEALED"
+    || phase === "DRAGGING"
+    || phase === "TEARING"
+    || phase === "OPEN"
+    || phase === "CARD_ENTER"
+    || phase === "REVEALING_CARD"
+    || phase === "FINAL_REVEAL";
+  const fastSlot = !reduced && !screenReader && cursor >= 2 && phase === "SEALED";
+  const reducedOpen = gestureFreeOpening(reduced, screenReader) && phase === "SEALED";
+  const currentCardKey = loaded ? cardPresentationKey(loaded.purchasedPackId, cardIndex) : undefined;
+  const resultReadyForPack = resultIsReady(readyPackId, currentCardKey, revealed);
+  const spokenCard = resultReadyForPack && card ? cardAnnouncement(card) : null;
+
+  const announcedCard = useRef<string | null>(null);
+  useEffect(() => {
+    if (!spokenCard || !currentCardKey || !focused || !foreground || announcedCard.current === currentCardKey) return;
+    announcedCard.current = currentCardKey;
+    AccessibilityInfo.announceForAccessibility(spokenCard);
+  }, [spokenCard, currentCardKey, focused, foreground]);
+
+  const pulls = resultReadyForPack && presentation === "fast" ? openedPulls(packs, cursor, true, cardIndex + 1) : [];
+  const spent = useMemo(() => sumCents(packs.map((pack) => pack.spentCents)), [packs]);
+  const estimated = useMemo(() => sumCents(packs.flatMap((pack) => pack.cards.map((item) => item.estimatedValueCents))), [packs]);
+  const best = useMemo(() => bestPull(packs.flatMap((pack) => pack.cards)), [packs]);
+  const toPortfolio = () => navigation.navigate("Tabs", { screen: "Portfolio" });
+  const rarityTone = rarityColor(card?.rarity);
+  const cinematicBand = phaseBand(phase, {
+    reduced,
+    skipping: skipAnimation,
+    error: notice !== null && (phase === "OPEN" || phase === "REVEALING_CARD"),
   });
 
-  const [cursor, setCursor] = useState(0);
-  const [summary, setSummary] = useState(false);
-  const [presentation, setPresentation] = useState<OpenMode>("full");
-  const [phase, setPhase] = useState<RevealPhase>("SEALED");
-  const [settling, setSettling] = useState(false);
-  const [hapticsOn, setHapticsOn] = useState(true);
-  const [reduced, setReduced] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [working, setWorking] = useState(false);
-
-  const dragY = useMemo(() => new Animated.Value(0), []);
-  const cardFade = useMemo(() => new Animated.Value(1), []);
-  const cardScale = useMemo(
-    () => cardFade.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1] }),
-    [cardFade],
-  );
-  const ambientOpacity = useMemo(
-    () => dragY.interpolate({ inputRange: [0, 48, 200], outputRange: [0.14, 0.22, 0.34], extrapolate: "clamp" }),
-    [dragY],
-  );
-  const phaseRef = useRef<RevealPhase>("SEALED");
-  const offsetRef = useRef(0);
-  const settlingRef = useRef(false);
-  const hapticsRef = useRef(true);
-  const reducedRef = useRef(false);
-  const skipHold = useRef(false);
-  const onlineRef = useRef(online);
-  const workingRef = useRef(false);
-  const cursorRef = useRef(0);
-  const packsRef = useRef<RevealPack[]>([]);
-  const touched = useRef(false);
-  const gestureEpoch = useRef(0);
-  const grantEpoch = useRef(0);
-  const samples = useRef<{ t: number; y: number }[]>([]);
-  const placed = useRef(false);
-  const packRef = useRef<RevealPack | null>(null);
-  const mounted = useRef(true);
-
-  const packs = useMemo(() => session.data ?? [], [session.data]);
-  const loaded = packs[cursor] ?? null;
-
-  useEffect(() => {
-    phaseRef.current = phase;
-  }, [phase]);
-  useEffect(() => {
-    return () => {
-      mounted.current = false;
-      dragY.stopAnimation();
-      cardFade.stopAnimation();
-    };
-  }, [cardFade, dragY]);
-  useEffect(() => {
-    hapticsRef.current = hapticsOn;
-  }, [hapticsOn]);
-  useEffect(() => {
-    reducedRef.current = reduced;
-  }, [reduced]);
-  useEffect(() => {
-    onlineRef.current = online;
-  }, [online]);
-  useEffect(() => {
-    cursorRef.current = cursor;
-  }, [cursor]);
-  useEffect(() => {
-    packsRef.current = packs;
-  }, [packs]);
-  useEffect(() => {
-    packRef.current = loaded;
-  }, [loaded]);
-
-  useEffect(() => {
-    void loadHapticsEnabled().then(setHapticsOn);
-  }, []);
-
-  const setRevealPhase = useCallback((next: RevealPhase) => {
-    phaseRef.current = next;
-    setPhase(next);
-  }, []);
-
-  const setCursorAt = useCallback((index: number) => {
-    cursorRef.current = index;
-    setCursor(index);
-  }, []);
-
-  const placeSleeve = useCallback((distance: number) => {
-    const next = Math.min(Math.max(0, distance), 320);
-    offsetRef.current = next;
-    dragY.setValue(next);
-  }, [dragY]);
-
-  const springShut = useCallback((from: number) => {
-    dragY.stopAnimation();
-    settlingRef.current = true;
-    setSettling(true);
-    placeSleeve(from);
-    Animated.timing(dragY, {
-      toValue: 0,
-      duration: 220,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: false,
-    }).start(({ finished }) => {
-      if (!mounted.current || !finished) {
-        return;
-      }
-      offsetRef.current = 0;
-      settlingRef.current = false;
-      setSettling(false);
-      setRevealPhase("SEALED");
-    });
-  }, [dragY, placeSleeve, setRevealPhase]);
-
-  const showStoredCard = useCallback(async (pack: RevealPack, holdMs: number) => {
-    const card = pack.cards[0];
-    if (!card) {
-      setNotice("This pack has no stored card.");
-      return;
-    }
-    skipHold.current = false;
-    setRevealPhase("REVEALING_CARD");
-    await submitReveal(pack.purchasedPackId, "REVEALING_CARD");
-    await waitWhile(() => !skipHold.current, holdMs);
-    playRarityHaptic(card.rarity, hapticsRef.current);
-    await submitReveal(pack.purchasedPackId, "CARD_REVEALED");
-    setRevealPhase("CARD_REVEALED");
-  }, [setRevealPhase]);
-
-  const showCompressed = useCallback(async (pack: RevealPack) => {
-    const card = pack.cards[0];
-    if (!card) {
-      setNotice("This pack has no stored card.");
-      return;
-    }
-    skipHold.current = false;
-    setRevealPhase("REVEALING_CARD");
-    await submitReveal(pack.purchasedPackId, "REVEALING_CARD");
-    await waitWhile(() => !skipHold.current, 140);
-    playRarityHaptic(card.rarity, hapticsRef.current);
-    await submitReveal(pack.purchasedPackId, "CARD_REVEALED");
-    setRevealPhase("CARD_REVEALED");
-  }, [setRevealPhase]);
-
-  const presentCard = useCallback(async (pack: RevealPack) => {
-    const card = pack.cards[0];
-    const mode = openMode(cursorRef.current + 1, card?.rarity ?? "COMMON");
-    setPresentation(mode);
-    if (revealMotion(reducedRef.current).travelPx === 0) {
-      await showStoredCard(pack, revealMotion(true).fadeMs);
-      return;
-    }
-    if (mode === "fast") {
-      await showCompressed(pack);
-      return;
-    }
-    await showStoredCard(pack, anticipationMs(card?.rarity ?? "COMMON"));
-  }, [showCompressed, showStoredCard]);
-
-  const continueReveal = useCallback(async (pack: RevealPack, stored: string) => {
-    const card = pack.cards[0];
-    setPresentation(openMode(cursorRef.current + 1, card?.rarity ?? "COMMON"));
-    if (!recoveryShowsCard(stored)) {
-      setRevealPhase("SEALED");
-      return;
-    }
-    if (stored === "CARD_REVEALED" || stored === "PACK_COMPLETE") {
-      setRevealPhase(stored);
-      return;
-    }
-    if (!card) {
-      setNotice("This pack has no stored card.");
-      return;
-    }
-    if (stored === "OPEN") {
-      await submitReveal(pack.purchasedPackId, "REVEALING_CARD");
-    }
-    await submitReveal(pack.purchasedPackId, "CARD_REVEALED");
-    setRevealPhase("CARD_REVEALED");
-  }, [setRevealPhase]);
-
-  const resume = useCallback(async (pack: RevealPack, stored: string) => {
-    if (workingRef.current) {
-      return;
-    }
-    workingRef.current = true;
-    setWorking(true);
-    setNotice(null);
-    try {
-      await continueReveal(pack, stored);
-    } catch (error) {
-      setNotice(error instanceof RevealRejected ? error.message : "The pack did not open.");
-    } finally {
-      workingRef.current = false;
-      setWorking(false);
-    }
-  }, [continueReveal]);
-
-  useEffect(() => {
-    const loadedPacks = session.data;
-    if (!loadedPacks || placed.current) {
-      return;
-    }
-    placed.current = true;
-    packsRef.current = loadedPacks;
-    const first = recoveryCursor(loadedPacks.map((pack) => pack.revealState));
-    if (first === "summary") {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time recovery when session loads
-      setSummary(true);
-      return;
-    }
-    setCursorAt(first);
-    const pack = loadedPacks[first];
-    if (!pack || pack.category !== "TRADING_CARD" || !recoveryShowsCard(pack.revealState)) {
-      setRevealPhase("SEALED");
-      return;
-    }
-    if (pack.revealState === "PACK_COMPLETE") {
-      setRevealPhase("PACK_COMPLETE");
-      return;
-    }
-    void resume(pack, pack.revealState);
-  }, [resume, session.data, setCursorAt, setRevealPhase]);
-
-  const refetchSession = session.refetch;
-  const reconcileSealed = useCallback(() => {
-    void refetchSession().then((result) => {
-      if (!placed.current) {
-        return;
-      }
-      const current = result.data?.[cursorRef.current];
-      if (!current || phaseRef.current !== "SEALED" || settlingRef.current || workingRef.current) {
-        return;
-      }
-      if (recoveryShowsCard(current.revealState) && current.category === "TRADING_CARD") {
-        void resume(current, current.revealState);
-      }
-    });
-  }, [refetchSession, resume]);
-
-  useFocusEffect(
-    useCallback(() => {
-      reconcileSealed();
-    }, [reconcileSealed]),
-  );
-
-  const resetUncommitted = useCallback(() => {
-    dragY.stopAnimation();
-    settlingRef.current = false;
-    setSettling(false);
-    placeSleeve(0);
-    setRevealPhase("SEALED");
-  }, [dragY, placeSleeve, setRevealPhase]);
-
-  useEffect(() => {
-    const subscription = AppState.addEventListener("change", (next) => {
-      if (next === "background") {
-        if (backgroundDuringTear(phaseRef.current) === "reset") {
-          gestureEpoch.current += 1;
-          resetUncommitted();
-        }
-        return;
-      }
-      if (next === "active") {
-        reconcileSealed();
-      }
-    });
-    return () => subscription.remove();
-  }, [reconcileSealed, resetUncommitted]);
-
-  useEffect(() => {
-    let alive = true;
-    void AccessibilityInfo.isReduceMotionEnabled().then((enabled) => {
-      if (!alive) {
-        return;
-      }
-      reducedRef.current = enabled;
-      setReduced(enabled);
-    });
-    const subscription = AccessibilityInfo.addEventListener("reduceMotionChanged", (enabled) => {
-      reducedRef.current = enabled;
-      setReduced(enabled);
-      if (enabled && (phaseRef.current === "SEALED" || phaseRef.current === "DRAGGING")) {
-        gestureEpoch.current += 1;
-        resetUncommitted();
-      }
-    });
-    return () => {
-      alive = false;
-      subscription.remove();
-    };
-  }, [resetUncommitted]);
-
-  const glide = useCallback((to: number, ms: number) => {
-    dragY.stopAnimation();
-    return new Promise<void>((resolve) => {
-      Animated.timing(dragY, {
-        toValue: to,
-        duration: ms,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: false,
-      }).start(({ finished }) => {
-        offsetRef.current = to;
-        if (finished) {
-          resolve();
-        }
-      });
-    });
-  }, [dragY]);
-
-  const commitTear = useCallback(async (source: "gesture" | "fast" | "reduced") => {
-    const pack = packRef.current;
-    if (!pack || workingRef.current || phaseRef.current === "TEARING") {
-      return;
-    }
-    if (source === "fast" && (cursorRef.current < 2 || reducedRef.current)) {
-      return;
-    }
-    if (source === "reduced" && !reducedRef.current) {
-      return;
-    }
-    if (!onlineRef.current) {
-      setNotice("You're offline. The pack stays sealed until the connection returns.");
-      if (source === "gesture") {
-        springShut(offsetRef.current);
-      }
-      return;
-    }
-    workingRef.current = true;
-    setWorking(true);
-    setNotice(null);
-    setRevealPhase("TEARING");
-    try {
-      const travel = revealMotion(source === "reduced" || reducedRef.current).travelPx;
-      if (travel === 0) {
-        placeSleeve(0);
-      } else if (source === "fast") {
-        await glide(travel, 260);
-      } else {
-        placeSleeve(travel);
-      }
-      playHaptic("tear", hapticsRef.current);
-      await submitReveal(pack.purchasedPackId, "OPEN");
-      setRevealPhase("OPEN");
-      await presentCard(pack);
-    } catch (error) {
-      setNotice(error instanceof RevealRejected ? error.message : "The pack did not open.");
-      const fresh = await loadRevealPack(pack.purchasedPackId).catch(() => null);
-      if (!fresh || fresh.revealState === "SEALED") {
-        springShut(offsetRef.current);
-        return;
-      }
-      packRef.current = fresh;
-      const card = fresh.cards[0];
-      setPresentation(openMode(cursorRef.current + 1, card?.rarity ?? "COMMON"));
-      if (fresh.revealState === "CARD_REVEALED" || fresh.revealState === "PACK_COMPLETE") {
-        setRevealPhase(fresh.revealState);
-        return;
-      }
-      setRevealPhase(fresh.revealState === "REVEALING_CARD" ? "REVEALING_CARD" : "OPEN");
-    } finally {
-      workingRef.current = false;
-      setWorking(false);
-    }
-  }, [glide, placeSleeve, presentCard, setRevealPhase, springShut]);
-
-  const commitRef = useRef(commitTear);
-  const springRef = useRef(springShut);
-  useEffect(() => {
-    commitRef.current = commitTear;
-    springRef.current = springShut;
-  }, [commitTear, springShut]);
-
-  /* Gesture handlers close over refs and sample Date.now only on touch events. */
-  /* eslint-disable react-hooks/refs, react-hooks/purity -- PanResponder event callbacks */
-  const panHandlers = useMemo(
-    () => PanResponder.create({
-      onStartShouldSetPanResponder: () =>
-        !reducedRef.current && phaseRef.current === "SEALED" && !settlingRef.current && !workingRef.current,
-      onMoveShouldSetPanResponder: () =>
-        !reducedRef.current
-        && (phaseRef.current === "SEALED" || phaseRef.current === "DRAGGING")
-        && !settlingRef.current
-        && !workingRef.current,
-      onPanResponderGrant: () => {
-        grantEpoch.current = gestureEpoch.current;
-        samples.current = [{ t: Date.now(), y: 0 }];
-        touched.current = false;
-      },
-      onPanResponderMove: (_event, gesture) => {
-        if (grantEpoch.current !== gestureEpoch.current) {
-          return;
-        }
-        if (phaseRef.current !== "SEALED" && phaseRef.current !== "DRAGGING") {
-          return;
-        }
-        const distance = Math.max(0, gesture.dy);
-        placeSleeve(distance);
-        const now = Date.now();
-        samples.current.push({ t: now, y: distance });
-        const cutoff = now - 90;
-        while (samples.current[0] && samples.current[0].t < cutoff) {
-          samples.current.shift();
-        }
-        if (distance >= 8 && phaseRef.current === "SEALED") {
-          phaseRef.current = "DRAGGING";
-          setPhase("DRAGGING");
-          if (!touched.current) {
-            touched.current = true;
-            playHaptic("touch", hapticsRef.current);
-          }
-        }
-      },
-      onPanResponderRelease: (_event, gesture) => {
-        if (grantEpoch.current !== gestureEpoch.current) {
-          return;
-        }
-        if (phaseRef.current !== "SEALED" && phaseRef.current !== "DRAGGING") {
-          return;
-        }
-        const distance = Math.max(0, gesture.dy);
-        const decision = decideTear(distance, velocityPxPerMs(samples.current));
-        if (decision === "tear") {
-          void commitRef.current("gesture");
-          return;
-        }
-        if (distance < 12) {
-          phaseRef.current = "SEALED";
-          setPhase("SEALED");
-          placeSleeve(0);
-          return;
-        }
-        springRef.current(distance);
-      },
-      onPanResponderTerminate: () => {
-        if (grantEpoch.current !== gestureEpoch.current) {
-          return;
-        }
-        if (phaseRef.current === "DRAGGING") {
-          springRef.current(offsetRef.current);
-        }
-      },
-    }).panHandlers,
-    [placeSleeve],
-  );
-  /* eslint-enable react-hooks/refs, react-hooks/purity */
-
-  async function finishPack() {
-    const current = packRef.current;
-    if (!current || workingRef.current) {
-      return;
-    }
-    workingRef.current = true;
-    setWorking(true);
-    setNotice(null);
-    try {
-      await submitReveal(current.purchasedPackId, "PACK_COMPLETE");
-      const all = packsRef.current.map((pack, index) =>
-        index === cursorRef.current ? { ...pack, revealState: "PACK_COMPLETE" } : pack,
-      );
-      packsRef.current = all;
-      queryClient.setQueryData(sessionKey, all);
-      void queryClient.invalidateQueries({ queryKey: ["holdings"] });
-      void queryClient.invalidateQueries({ queryKey: ["sealed-packs"] });
-      const next = cursorRef.current + 1;
-      if (next >= all.length) {
-        setRevealPhase("PACK_COMPLETE");
-        if (all.length > 1) {
-          setSummary(true);
-        }
-        return;
-      }
-      const upcoming = all[next];
-      if (!upcoming) {
-        return;
-      }
-      setCursorAt(next);
-      placeSleeve(0);
-      setPresentation("full");
-      if (upcoming.revealState === "SEALED" || upcoming.category !== "TRADING_CARD") {
-        setRevealPhase("SEALED");
-        return;
-      }
-      await continueReveal(upcoming, upcoming.revealState);
-    } catch (error) {
-      setNotice(error instanceof RevealRejected ? error.message : "The pack did not open.");
-    } finally {
-      workingRef.current = false;
-      setWorking(false);
-    }
-  }
-
-  async function toggleHaptics() {
-    const next = !hapticsRef.current;
-    hapticsRef.current = next;
-    setHapticsOn(next);
-    await saveHapticsEnabled(next);
-  }
-
-  const card = loaded?.cards[0];
-  const revealed = phase === "CARD_REVEALED" || phase === "PACK_COMPLETE";
-  const anticipating = phase === "REVEALING_CARD" && card !== undefined && isHighRarity(card.rarity) && presentation !== "fast" && !reduced;
-  const sleeveVisible = phase === "SEALED" || phase === "DRAGGING" || phase === "TEARING";
-  const fastSlot = !reduced && cursor >= 2 && phase === "SEALED" && !settling;
-  const reducedOpen = reduced && phase === "SEALED" && !settling;
-  const spokenCard = revealed && card ? cardAnnouncement(card) : null;
-
-  useEffect(() => {
-    if (!reduced || sleeveVisible) {
-      cardFade.setValue(1);
-      return;
-    }
-    cardFade.setValue(0);
-    const fade = Animated.timing(cardFade, {
-      toValue: 1,
-      duration: revealMotion(true).fadeMs,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: false,
-    });
-    fade.start();
-    return () => fade.stop();
-  }, [cardFade, reduced, sleeveVisible, phase, cursor]);
-
-  useEffect(() => {
-    if (!spokenCard) {
-      return;
-    }
-    AccessibilityInfo.announceForAccessibility(spokenCard);
-  }, [spokenCard]);
-  const pulls = revealed && presentation === "fast" ? openedPulls(packs, cursor, true) : [];
-  const spent = sumCents(packs.map((pack) => pack.spentCents));
-  const estimated = sumCents(packs.flatMap((pack) => pack.cards.map((item) => item.estimatedValueCents)));
-  const best = bestPull(packs.flatMap((pack) => pack.cards));
-
-  const toPortfolio = () => navigation.navigate("Tabs", { screen: "Portfolio" });
-
-  const categoryTone = colors.category.TRADING_CARD;
-  const rarityTone = rarityColor(card?.rarity);
-
   return (
-    <RevealFrame onClose={toPortfolio}>
+    <RevealFrame band={cinematicBand} reduced={reduced} starCount={caps.stars} onClose={toPortfolio}>
       {summary ? (
         <View
           accessibilityLabel={summaryAnnouncement(packs.length, spent, estimated, best?.name ?? "None")}
@@ -618,7 +114,7 @@ export function RevealScreen() {
             <Text maxFontSizeMultiplier={maxFontScale.display} style={styles.summaryValue}>{formatCents(spent)}</Text>
           </View>
           <View style={styles.summaryRow}>
-            <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.summaryLabel}>Collection value</Text>
+            <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.summaryLabel}>Estimated Collection Value</Text>
             <Text maxFontSizeMultiplier={maxFontScale.display} style={styles.summaryValue}>{formatCents(estimated)}</Text>
           </View>
           <View style={styles.summaryBest}>
@@ -630,24 +126,20 @@ export function RevealScreen() {
               </Text>
             ) : null}
           </View>
-          <PrimaryButton fullWidth label="View Portfolio" onPress={toPortfolio} />
+          <PrimaryButton fullWidth label="View Collection" onPress={toPortfolio} />
         </View>
       ) : (
-        <View style={styles.column}>
-          <View style={styles.header}>
-            <View style={styles.headerCopy}>
-              <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.kicker}>Reveal</Text>
-              <Text maxFontSizeMultiplier={maxFontScale.display} numberOfLines={1} style={styles.title}>
-                {loaded?.name ?? "Pack"}
-              </Text>
+        <View style={[styles.column, styles.columnFill]}>
+          {!animationPlaying && loaded && loaded.category !== "TRADING_CARD" ? (
+            <View style={styles.header}>
+              <View style={styles.headerCopy}>
+                <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.kicker}>Reveal</Text>
+                <Text maxFontSizeMultiplier={maxFontScale.display} numberOfLines={1} style={styles.title}>
+                  {loaded.name}
+                </Text>
+              </View>
             </View>
-            <TertiaryButton
-              accessibilityHint="The card name, rarity, and value stay on screen."
-              accessibilityLabel={hapticsOn ? "Haptics on" : "Haptics off"}
-              label={hapticsOn ? "Haptics on" : "Haptics off"}
-              onPress={() => void toggleHaptics()}
-            />
-          </View>
+          ) : null}
           {session.isLoading ? <RevealLoadSkeleton /> : null}
           {session.isError ? (
             <ErrorState
@@ -663,141 +155,181 @@ export function RevealScreen() {
           {loaded && loaded.category !== "TRADING_CARD" ? (
             <View style={styles.statusBlock}>
               <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.notice}>This pack is in your collection.</Text>
-              <PrimaryButton label="View Portfolio" onPress={toPortfolio} />
+              <PrimaryButton label="View Collection" onPress={toPortfolio} />
             </View>
           ) : null}
           {loaded && loaded.category === "TRADING_CARD" ? (
-            <View style={styles.column}>
-              <ConnectivityBanner offlineDetail="The pack stays sealed until the connection returns." />
-              {packs.length > 1 ? (
-                <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.progress}>
-                  {`Pack ${cursor + 1} of ${packs.length}`}
-                </Text>
+            <View style={[styles.column, styles.revealColumn]}>
+              {!animationPlaying ? (
+                <ConnectivityBanner offlineDetail="The pack stays sealed until the connection returns." />
               ) : null}
-              <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.status}>
-                {statusCopy(phase, settling, reduced, presentation)}
-              </Text>
-              <View style={styles.stage}>
-                <Animated.View
-                  pointerEvents="none"
-                  style={[
-                    styles.ambient,
-                    {
-                      backgroundColor: anticipating ? rarityTone.solid : categoryTone.solid,
-                      opacity: anticipating ? 0.28 : ambientOpacity,
-                      ...glow(anticipating ? rarityTone.solid : categoryTone.solid, anticipating ? 42 : 28),
-                    },
-                  ]}
-                />
-                {anticipating ? <RareSparkle color={rarityTone.solid} /> : null}
-                {sleeveVisible ? (
-                  <Animated.View
-                    accessibilityLabel={reduced ? "Sealed pack. Reveal next card." : "Sealed pack. Drag down to tear it open."}
-                    style={[styles.sleeve, reduced ? null : { transform: [{ translateY: dragY }] }]}
-                    {...(reduced ? {} : panHandlers)}
-                  >
-                    <View style={[styles.sleeveEdge, { borderColor: categoryTone.border }]} />
-                    <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.brand}>GRAILHAUS</Text>
-                    <Text maxFontSizeMultiplier={maxFontScale.display} style={styles.tier}>{loaded.tier}</Text>
-                    <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.hint}>
-                      {reduced ? "Reveal next card" : "Drag down"}
-                    </Text>
-                  </Animated.View>
-                ) : (
-                  <Animated.View
-                    accessibilityLabel={spokenCard ?? undefined}
-                    accessibilityLiveRegion={spokenCard ? "polite" : "none"}
-                    style={[
-                      styles.face,
-                      anticipating
-                        ? [styles.faceRare, { borderColor: rarityTone.solid }, glow(rarityTone.solid, 32)]
-                        : null,
-                      reduced ? { opacity: cardFade, transform: [{ scale: cardScale }] } : null,
-                    ]}
-                  >
-                    {anticipating ? (
-                      <Text maxFontSizeMultiplier={maxFontScale.body} style={[styles.hold, { color: rarityTone.solid }]}>
-                        Hold on.
-                      </Text>
-                    ) : null}
-                    {revealed && card ? (
-                      <View style={styles.cardBody}>
-                        <CollectibleArt
-                          category="TRADING_CARD"
-                          height={120}
-                          style={styles.cardArt}
-                          title={card.name}
-                        />
-                        <Text
-                          maxFontSizeMultiplier={maxFontScale.body}
-                          style={[styles.rarity, { color: rarityTone.solid }]}
+              <View style={styles.stageFlex}>
+              <CardContinueGesture
+                enabled={phase === "CARD_REVEALED" && resultReadyForPack && !working && online}
+                onContinue={() => void finishPack()}
+              >
+                <Pressable
+                  style={[styles.stage, sleeveVisible ? styles.stageSealed : styles.stageCentered]}
+                  onPress={() => {
+                    if (phase === "CARD_REVEALED" && resultReadyForPack && !working && online) {
+                      void finishPack();
+                      return;
+                    }
+                    speedUpSuspense();
+                  }}
+                  accessible={false}
+                >
+                  {sleeveVisible ? (
+                    <PackStage
+                      key={loaded.purchasedPackId}
+                      active={focused && foreground}
+                      idle={phase === "SEALED"}
+                      idleFloat={caps.idleFloat}
+                      exiting={phase === "TEARING"}
+                      exitMode={timingMode({ quality, compressed: fastRequested })}
+                      exitTravelY={stageLayout.packExitTravel}
+                      reduced={reduced}
+                    >
+                      <TearPayoff
+                        compressed={fastRequested}
+                        tearing={phase === "TEARING"}
+                        active={focused && foreground}
+                        reduced={reduced}
+                        quality={quality}
+                        onFinished={finishTearPayoff}
+                      >
+                        <SliceGesture
+                          tearing={phase === "TEARING"}
+                          enabled={focused && foreground && online && !reduced && !screenReader && !working && (phase === "SEALED" || phase === "DRAGGING")}
+                          resetToken={sealReset}
+                          onBegin={beginSeal}
+                          onComplete={completeSeal}
+                          onReset={cancelSeal}
+                          onTick={sealTick}
                         >
-                          {spokenRarity(card.rarity)}
-                        </Text>
-                        <Text maxFontSizeMultiplier={maxFontScale.display} style={styles.cardName}>{card.name}</Text>
-                        <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.meta}>
-                          Estimated value {formatCents(card.estimatedValueCents)}
-                        </Text>
+                          <View accessibilityLabel={gestureFreeOpening(reduced, screenReader) ? "Sealed pack. Double tap to reveal." : "Sealed pack. Slice the seal to open."}>
+                            <PackArtwork
+                              labels={false}
+                              name={loaded.name}
+                              opened={phase === "TEARING"}
+                              sealIdle={phase === "SEALED" && caps.idleFloat}
+                              tier={loaded.tier}
+                            />
+                          </View>
+                        </SliceGesture>
+                      </TearPayoff>
+                    </PackStage>
+                  ) : (
+                    <CardStage
+                      compressed={presentation === "fast"}
+                      key={currentCardKey}
+                      previous={<PreviousCards cards={loaded.cards} index={cardIndex} reduced={reduced} />}
+                      tier={loaded.tier}
+                      rarity={card?.rarity ?? "COMMON"}
+                      suspense={phase === "REVEALING_CARD"}
+                      suspenseDurationMs={suspenseDurationMs}
+                      speedUp={speedUp}
+                      suspenseToken={suspense.token}
+                      onSuspenseCue={suspenseCue}
+                      onSuspenseFinished={finishSuspense}
+                      flipping={phase === "FINAL_REVEAL"}
+                      flipToken={finalBeat.token}
+                      onImpact={revealImpact}
+                      onFlipFinished={finishFlip}
+                      front={(
+                        <View style={styles.face}>
+                          <RevealFaceArtwork imageUrl={card?.imageUrl} name={card?.name ?? "Collectible"} reduced={reduced || skipAnimation} />
+                        </View>
+                      )}
+                      cardCount={loaded.cards.length - cardIndex}
+                      entering={phase === "CARD_ENTER"}
+                      revealed={revealed}
+                      active={focused && foreground}
+                      reduced={reduced || skipAnimation}
+                      token={cardEntrance.token}
+                      onFinished={finishCardEntrance}
+                      foil={caps.foil}
+                      idleFloat={caps.idleFloat}
+                      riseFromY={stageLayout.cardRiseStart}
+                      launchScale={stageLayout.cardLaunchScale}
+                    >
+                      <View
+                        accessibilityLabel={spokenCard ?? undefined}
+                        accessible={resultReadyForPack}
+                        accessibilityElementsHidden={!resultReadyForPack}
+                        importantForAccessibility={resultReadyForPack ? "yes" : "no-hide-descendants"}
+                        style={styles.face}
+                      >
+                        {card ? (
+                          <RevealResult
+                            compressed={presentation === "fast"}
+                            card={card}
+                            packId={currentCardKey ?? loaded.purchasedPackId}
+                            active={focused && foreground}
+                            reduced={reduced || skipAnimation}
+                            ready={resultReadyForPack}
+                            quality={quality}
+                            onReady={resultReady}
+                            rarityColor={rarityTone.solid}
+                            foilIntensity={caps.foil}
+                          />
+                        ) : null}
                       </View>
-                    ) : (
-                      <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.hold}>
-                        {anticipating ? "" : "Opening."}
-                      </Text>
-                    )}
-                  </Animated.View>
+                    </CardStage>
+                  )}
+                </Pressable>
+              </CardContinueGesture>
+              </View>
+              <View style={styles.resultFooter}>
+                {!animationPlaying && phase === "CARD_REVEALED" && resultReadyForPack ? (
+                  <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.notice}>
+                    Tap or swipe to continue{loaded.cards.length > 1 ? ` · Card ${cardIndex + 1} of ${loaded.cards.length}` : ""}
+                  </Text>
+                ) : null}
+                {!animationPlaying && pulls.length > 0 ? <Fan pulls={pulls} /> : null}
+                {animationPlaying && sleeveVisible ? (
+                  <>
+                    {reducedOpen ? (
+                      <PrimaryButton
+                        disabled={working || !online}
+                        fullWidth
+                        label="Reveal next card"
+                        loading={working}
+                        onPress={() => void commitTear("reduced")}
+                      />
+                    ) : null}
+                    <SealedControls visible={!reducedOpen && (phase === "SEALED" || phase === "DRAGGING")} />
+                  </>
+                ) : (
+                  <RevealActions
+                    continueLabel={
+                      nextCardIndex(cardIndex, loaded.cards.length) !== null
+                        ? "Reveal next card"
+                        : nextCardLabel(cursor < packs.length - 1)
+                    }
+                    fastRequested={fastRequested}
+                    fastSlot={fastSlot && !animationPlaying}
+                    online={online}
+                    packsLeftLabel={remainingPacksLabel(packs.length - cursor)}
+                    phase={phase}
+                    reducedOpen={false}
+                    resultReady={resultReadyForPack}
+                    showPackComplete={phase === "PACK_COMPLETE" && packs.length < 2}
+                    showReplay={canReplayReveal(phase)}
+                    showReset={false}
+                    showSkip={canSkipReveal(phase) && !skipAnimation && !animationPlaying}
+                    working={working}
+                    onClearFast={clearFastOpen}
+                    onCollection={toPortfolio}
+                    onContinue={() => void finishPack()}
+                    onFastOpen={() => void commitTear("fast")}
+                    onReducedOpen={() => void commitTear("reduced")}
+                    onReplay={replayReveal}
+                    onReset={resetReveal}
+                    onSkip={skipReveal}
+                  />
                 )}
               </View>
-              {pulls.length > 0 ? <Fan pulls={pulls} /> : null}
-              <View style={styles.actions}>
-                {fastSlot ? (
-                  <View style={styles.speedUp}>
-                    <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.speedUpTitle}>
-                      Speed up remaining packs?
-                    </Text>
-                    <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.speedUpBody}>
-                      {remainingPacksLabel(packs.length - cursor)} Quick tear, then a fan of cards already opened.
-                      Epic and legendary pulls still pause.
-                    </Text>
-                    <PrimaryButton
-                      disabled={working || !online}
-                      fullWidth
-                      label="Fast Open"
-                      loading={working}
-                      onPress={() => void commitTear("fast")}
-                    />
-                  </View>
-                ) : null}
-                {reducedOpen ? (
-                  <PrimaryButton
-                    disabled={working || !online}
-                    fullWidth
-                    label="Reveal next card"
-                    loading={working}
-                    onPress={() => void commitTear("reduced")}
-                  />
-                ) : null}
-                {phase === "REVEALING_CARD" ? (
-                  <TertiaryButton
-                    label="Skip animation"
-                    onPress={() => {
-                      skipHold.current = true;
-                    }}
-                  />
-                ) : null}
-                {phase === "CARD_REVEALED" ? (
-                  <PrimaryButton
-                    disabled={working || !online}
-                    fullWidth
-                    label={working ? "Saving…" : nextCardLabel(cursor < packs.length - 1)}
-                    loading={working}
-                    loadingLabel="Saving…"
-                    onPress={() => void finishPack()}
-                  />
-                ) : null}
-              </View>
-              {phase === "PACK_COMPLETE" && packs.length < 2 ? (
-                <Text maxFontSizeMultiplier={maxFontScale.body} style={styles.notice}>This pack is open.</Text>
-              ) : null}
             </View>
           ) : null}
           {notice ? (
@@ -809,9 +341,7 @@ export function RevealScreen() {
                       variant: "primary",
                       onPress: () => {
                         const current = packRef.current;
-                        if (current) {
-                          void resume(current, phase);
-                        }
+                        if (current) void resume(current);
                       },
                     }
                   : undefined
@@ -827,38 +357,26 @@ export function RevealScreen() {
   );
 }
 
-function RevealFrame({ children, onClose }: { children: ReactNode; onClose: () => void }) {
+function RevealFrame({
+  children,
+  onClose,
+  band,
+  reduced,
+  starCount,
+}: {
+  children: ReactNode;
+  onClose: () => void;
+  band: ReturnType<typeof phaseBand>;
+  reduced: boolean;
+  starCount: number;
+}) {
   return (
     <View style={styles.screen}>
-      <View pointerEvents="none" style={styles.vignette} />
-      <AppHeader back={onClose} backKind="close" backLabel="Close and go to Portfolio" />
+      <RevealBackground band={band} reduced={reduced} starCount={starCount} />
+      <View style={styles.closeChrome}>
+        <AppHeader back={onClose} backKind="close" backLabel="Close and go to Collection" />
+      </View>
       <View style={styles.body}>{children}</View>
-    </View>
-  );
-}
-
-function RareSparkle({ color }: { color: string }) {
-  return (
-    <View pointerEvents="none" style={styles.sparkleLayer}>
-      {rareDots.map((dot, index) => (
-        <View
-          key={index}
-          style={[
-            styles.sparkle,
-            {
-              backgroundColor: color,
-              width: dot.size,
-              height: dot.size,
-              borderRadius: dot.size,
-              top: dot.top,
-              bottom: dot.bottom,
-              left: dot.left,
-              right: dot.right,
-              opacity: 0.45 + (index % 3) * 0.12,
-            },
-          ]}
-        />
-      ))}
     </View>
   );
 }
@@ -902,9 +420,7 @@ function Fan({ pulls }: { pulls: RevealCard[] }) {
 }
 
 function remainingPacksLabel(remaining: number): string {
-  if (remaining <= 1) {
-    return "1 pack left.";
-  }
+  if (remaining <= 1) return "1 pack left.";
   return `${remaining} packs left.`;
 }
 
@@ -915,66 +431,18 @@ function rarityColor(rarity: string | undefined) {
   return colors.rarity.COMMON;
 }
 
-function openedPulls(packs: RevealPack[], cursor: number, currentRevealed: boolean): RevealCard[] {
+function openedPulls(packs: RevealPack[], cursor: number, currentRevealed: boolean, currentCardCount: number): RevealCard[] {
   const pulls: RevealCard[] = [];
   for (let index = 0; index < packs.length; index += 1) {
     const pack = packs[index];
-    if (!pack) {
-      continue;
-    }
+    if (!pack) continue;
     const opened = index < cursor || (index === cursor && currentRevealed);
-    if (!opened) {
-      continue;
-    }
-    for (const card of pack.cards) {
+    if (!opened) continue;
+    for (const card of index === cursor ? pack.cards.slice(0, currentCardCount) : pack.cards) {
       pulls.push(card);
     }
   }
   return fanInOpenOrder(pulls);
-}
-
-function statusCopy(
-  phase: RevealPhase,
-  settling: boolean,
-  reduced: boolean,
-  presentation: OpenMode,
-): string {
-  if (settling) {
-    return "It springs shut.";
-  }
-  switch (phase) {
-    case "SEALED":
-      return sealedDirection(reduced);
-    case "DRAGGING":
-      return "Dragging.";
-    case "TEARING":
-    case "OPEN":
-      return "Opening.";
-    case "REVEALING_CARD":
-      if (presentation === "premium") {
-        return "Premium pull. Hold on.";
-      }
-      return "Opening.";
-    case "CARD_REVEALED":
-    case "PACK_COMPLETE":
-      return "Revealed.";
-    default:
-      return "Sealed. Drag down to tear it open.";
-  }
-}
-
-function waitWhile(keepWaiting: () => boolean, ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    const started = Date.now();
-    const tick = () => {
-      if (!keepWaiting() || Date.now() - started >= ms) {
-        resolve();
-        return;
-      }
-      setTimeout(tick, 40);
-    };
-    setTimeout(tick, 40);
-  });
 }
 
 const styles = StyleSheet.create({
@@ -982,19 +450,23 @@ const styles = StyleSheet.create({
     backgroundColor: colors.backgroundPrimary,
     flex: 1,
   },
-  vignette: {
-    ...StyleSheet.absoluteFill,
-    backgroundColor: colors.backgroundSecondary,
-    opacity: 0.35,
+  closeChrome: {
+    opacity: 0.72,
   },
   body: {
     flex: 1,
-    paddingBottom: spacing.xxl,
+    paddingBottom: spacing.lg,
     paddingHorizontal: layout.screenPadding,
-    paddingTop: spacing.sm,
+    paddingTop: spacing.xs,
   },
   column: {
     gap: spacing.sm,
+  },
+  columnFill: {
+    flex: 1,
+  },
+  revealColumn: {
+    flex: 1,
   },
   summary: {
     gap: spacing.md,
@@ -1031,22 +503,6 @@ const styles = StyleSheet.create({
     ...typography.bodySmall,
     color: colors.textSecondary,
   },
-  speedUp: {
-    backgroundColor: colors.surfacePrimary,
-    borderColor: colors.borderSubtle,
-    borderRadius: radius.card,
-    borderWidth: 1,
-    gap: spacing.sm,
-    padding: spacing.base,
-  },
-  speedUpTitle: {
-    ...typography.heading,
-    color: colors.textPrimary,
-  },
-  speedUpBody: {
-    ...typography.bodySmall,
-    color: colors.textSecondary,
-  },
   header: {
     alignItems: "flex-start",
     flexDirection: "row",
@@ -1079,113 +535,47 @@ const styles = StyleSheet.create({
     letterSpacing: 0.4,
     marginTop: spacing.sm,
   },
-  status: {
-    ...typography.bodySmall,
-    color: colors.textSecondary,
-  },
   stage: {
     alignItems: "center",
-    height: 340,
+    width: "100%",
+  },
+  stageFlex: {
+    flex: 1,
+    minHeight: 0,
+  },
+  /** Sealed pack rests bottom-center above the slice hint. */
+  stageSealed: {
+    flex: 1,
+    justifyContent: "flex-end",
+    minHeight: 0,
+    paddingBottom: spacing.sm,
+  },
+  /** Card / result stages stay optically centered. */
+  stageCentered: {
+    flex: 1,
     justifyContent: "center",
-    marginTop: spacing.md,
+    minHeight: 0,
   },
-  ambient: {
-    borderRadius: radius.full,
-    height: 220,
-    position: "absolute",
-    width: 220,
-  },
-  sparkleLayer: {
-    ...StyleSheet.absoluteFill,
-  },
-  sparkle: {
-    position: "absolute",
-  },
-  sleeve: {
-    alignItems: "center",
-    backgroundColor: colors.surfaceElevated,
-    borderColor: colors.borderStrong,
-    borderRadius: radius.modal,
-    borderWidth: 1,
-    height: 300,
-    justifyContent: "center",
-    overflow: "hidden",
-    width: 214,
-    ...shadows.medium,
-  },
-  sleeveEdge: {
-    borderRadius: radius.modal,
-    borderWidth: 1,
-    bottom: 10,
-    left: 10,
-    position: "absolute",
-    right: 10,
-    top: 10,
-  },
-  brand: {
-    ...typography.label,
-    color: colors.category.TRADING_CARD.solid,
-    letterSpacing: 2.4,
-  },
-  tier: {
-    ...typography.title,
-    color: colors.textPrimary,
-    marginTop: spacing.md,
-  },
-  hint: {
-    ...typography.bodySmall,
-    color: colors.textTertiary,
-    marginTop: spacing.xl,
+  resultFooter: {
+    gap: spacing.sm,
+    paddingBottom: spacing.sm,
+    paddingTop: spacing.md,
   },
   face: {
     alignItems: "center",
-    backgroundColor: colors.surfacePrimary,
-    borderColor: colors.borderSubtle,
+    backgroundColor: "#0A0B0F",
+    borderColor: "rgba(217, 189, 133, 0.32)",
     borderRadius: radius.modal,
     borderWidth: 1,
-    height: 300,
+    elevation: 20,
+    height: revealCardFrame.height,
     justifyContent: "center",
     overflow: "hidden",
-    paddingHorizontal: spacing.base,
-    paddingVertical: spacing.md,
-    width: 214,
-    ...shadows.medium,
-  },
-  faceRare: {
-    backgroundColor: colors.surfaceElevated,
-  },
-  hold: {
-    ...typography.heading,
-    color: colors.accent.solid,
-    textAlign: "center",
-  },
-  cardBody: {
-    alignItems: "center",
-    gap: spacing.sm,
-    width: "100%",
-  },
-  cardArt: {
-    borderRadius: radius.card,
-    width: "100%",
-  },
-  rarity: {
-    ...typography.label,
-    letterSpacing: 1.2,
-    textAlign: "center",
-  },
-  cardName: {
-    ...typography.title,
-    color: colors.textPrimary,
-    textAlign: "center",
-  },
-  meta: {
-    ...typography.bodySmall,
-    color: colors.textSecondary,
-    textAlign: "center",
-  },
-  actions: {
-    gap: spacing.sm,
-    marginTop: spacing.sm,
+    shadowColor: "#000000",
+    shadowOffset: { width: 0, height: 20 },
+    shadowOpacity: 0.55,
+    shadowRadius: 28,
+    width: revealCardFrame.width,
   },
   fanBlock: {
     gap: spacing.sm,
