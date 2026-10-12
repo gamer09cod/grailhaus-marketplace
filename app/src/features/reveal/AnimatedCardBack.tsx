@@ -58,7 +58,8 @@ export function AnimatedCardBack({ rarity, suspense, durationMs, active, reduced
       { perspective: 1100 },
       { rotateY: `${angle.value}deg` },
       { rotateX: rotating ? `${Math.sin(angle.value * Math.PI / 180) * 4}deg` : "0deg" },
-      { scale: rotating ? 1.02 - Math.abs(Math.sin(angle.value * Math.PI / 180)) * 0.08 : 1 },
+      // Keep ≥1 so foreshortening does not open a hole against the stage.
+      { scale: rotating ? 1 + Math.abs(Math.sin(angle.value * Math.PI / 180)) * 0.06 : 1 },
     ],
   }));
   return <View accessible accessibilityLabel="Card back. Purchased contents remain hidden.">

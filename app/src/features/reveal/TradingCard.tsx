@@ -53,6 +53,8 @@ export const TradingCard = memo(function TradingCard({
 
   return (
     <View style={styles.stage}>
+      {/* Full-frame chassis stays put while faces rotate — no stage bleed at edge-on. */}
+      <View pointerEvents="none" style={styles.plate} />
       <Animated.View style={[styles.surface, backStyle]}>{back}</Animated.View>
       {showFront ? (
         <Animated.View
@@ -74,6 +76,11 @@ const styles = StyleSheet.create({
   stage: {
     width: revealCardFrame.width,
     height: revealCardFrame.height,
+  },
+  plate: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: "#0A0B0F",
+    borderRadius: 22,
   },
   surface: {
     position: "absolute",

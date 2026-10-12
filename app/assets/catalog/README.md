@@ -4,7 +4,7 @@ This set contains 27 individual fictional trading-card illustrations, ten square
 
 Each card illustration is named after its matching seeded collectible. Starter COMMON is Emberkin (`emberkin.jpg`); Scout RARE is Rookwing (`rookwing.jpg`); Collector/Elite LEGENDARY is Auric Crown (`auric-crown.jpg`); Elite/Collector EPIC is Nyxara (`nyxara.jpg`); Legendary pack LEGENDARY is Aurelith Drake (`aurelith-drake.jpg`). Trading-card pack SKUs each have a dedicated sleeve (`pack-card.jpg`, `pack-card-scout.jpg`, `pack-card-collector.jpg`, `pack-card-elite.jpg`, `pack-card-legendary.jpg`, `pack-card-midnight.jpg`). Sneaker and watch SKUs still share their category packaging image; the app displays the tier/name separately. Each of the five seeded sneaker and five seeded watch items has a distinct item illustration.
 
-Mobile copies are JPEG quality 88 at 1024×1024 for shoes and watches. Card and pack designs remain the existing bundled set. Runtime uses bundled files and never depends on a developer tool directory.
+Mobile copies are recompressed for APK size: shoes/watches up to 768px on the long edge, cards/packs up to 900px, JPEG quality 74 (`python scripts/compress-catalog-art.py`). Runtime uses bundled files and never depends on a developer tool directory.
 
 The static registry is `app/src/components/catalogArtwork.ts`. Shared `CollectibleArt` resolves bundled artwork by catalog item name first (sneaker/watch product JPEGs, never the category pack sleeve), then a remote `image_url` if no bundle match exists, then monogram fallback. Known art is reused in shelf previews, reveal fronts/results/stacks, owned items, and marketplace. Card-back and suspense remain identity-free.
 

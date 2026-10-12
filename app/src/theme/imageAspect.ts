@@ -24,9 +24,9 @@ export const revealCardFrame = {
   height: 376,
 } as const;
 
-/** Catalog source raster size for sneaker/watch bundled art. */
+/** Catalog source raster size for sneaker/watch bundled art (post-compress). */
 export const catalogSourcePx = {
-  productSquare: 1024,
+  productSquare: 768,
 } as const;
 
 export type ImageAspectKey = keyof typeof imageAspect;

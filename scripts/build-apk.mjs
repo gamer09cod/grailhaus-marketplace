@@ -33,8 +33,9 @@ if (!String(env.NODE_OPTIONS ?? "").includes("--use-system-ca")) {
   env.NODE_OPTIONS = [env.NODE_OPTIONS, "--use-system-ca"].filter(Boolean).join(" ");
 }
 
-if (process.platform === "win32") {
-  env.GRADLE_USER_HOME = "C:\\g";
+const gradleUserHome = process.platform === "win32" ? "C:\\g" : null;
+if (gradleUserHome) {
+  env.GRADLE_USER_HOME = gradleUserHome;
 }
 
 function run(command, cwd) {
@@ -85,6 +86,48 @@ foreach ($c in @(Get-ChildItem Cert:\\LocalMachine\\Root) + @(Get-ChildItem Cert
   env.JAVA_TOOL_OPTIONS = [env.JAVA_TOOL_OPTIONS, option].filter(Boolean).join(" ");
 }
 
+function stopAndroidDaemons() {
+  const androidDir = path.join(appDir, "android");
+  const gradleScript = process.platform === "win32" ? "gradlew.bat" : "gradlew";
+  if (fs.existsSync(path.join(androidDir, gradleScript))) {
+    console.log("- Stopping Gradle");
+    const gradle = process.platform === "win32" ? "gradlew.bat --stop" : "./gradlew --stop";
+    spawnSync(gradle, {
+      cwd: androidDir,
+      env,
+      stdio: "inherit",
+      shell: true,
+    });
+  }
+
+  if (!gradleUserHome) {
+    return;
+  }
+
+  // A previous build leaves Gradle and the Kotlin daemon holding dex files, so prebuild cannot delete android/.
+  console.log("- Releasing Android file locks");
+  spawnSync(
+    "powershell",
+    [
+      "-NoProfile",
+      "-Command",
+      `
+$ErrorActionPreference = 'SilentlyContinue'
+$gradleHome = [regex]::Escape($env:GRAILHAUS_GRADLE_USER_HOME)
+Get-CimInstance Win32_Process -Filter "Name = 'java.exe'" | Where-Object {
+  $_.CommandLine -match 'org\\.gradle\\.launcher\\.daemon\\.bootstrap\\.GradleDaemon|org\\.jetbrains\\.kotlin\\.daemon\\.KotlinCompileDaemon' -and
+  $_.CommandLine -match $gradleHome
+} | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+Start-Sleep -Seconds 2
+`,
+    ],
+    {
+      env: { ...env, GRAILHAUS_GRADLE_USER_HOME: gradleUserHome },
+      stdio: "inherit",
+    },
+  );
+}
+
 function keepDevAndroidScript() {
   const pkgPath = path.join(appDir, "package.json");
   const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
@@ -95,8 +138,30 @@ function keepDevAndroidScript() {
   fs.writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
 }
 
+/** Phone release APK: arm64 only. Emulator/x86 libs roughly double the APK. */
+function pinReleaseArchitectures() {
+  const gradleProps = path.join(appDir, "android", "gradle.properties");
+  if (!fs.existsSync(gradleProps)) {
+    console.error(`Missing ${gradleProps} after prebuild.`);
+    process.exit(1);
+  }
+  let text = fs.readFileSync(gradleProps, "utf8");
+  if (/^reactNativeArchitectures=/m.test(text)) {
+    text = text.replace(
+      /^reactNativeArchitectures=.*$/m,
+      "reactNativeArchitectures=arm64-v8a",
+    );
+  } else {
+    text += "\nreactNativeArchitectures=arm64-v8a\n";
+  }
+  fs.writeFileSync(gradleProps, text);
+  console.log("- Release native ABIs: arm64-v8a");
+}
+
+stopAndroidDaemons();
 run("npx expo prebuild --platform android --no-install", appDir);
 keepDevAndroidScript();
+pinReleaseArchitectures();
 useWindowsTrustStore();
 
 const gradle = process.platform === "win32" ? "gradlew.bat" : "./gradlew";

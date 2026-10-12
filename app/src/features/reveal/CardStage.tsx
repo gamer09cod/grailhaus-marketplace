@@ -238,7 +238,8 @@ export function CardStage({
           reduced={reduced}
         />
         <Animated.View style={[styles.cards, cardMotion]}>
-          <View style={styles.rim} pointerEvents="none" />
+          {/* Rim only after the face is settled — a full-size rim during flip left a grey hole. */}
+          {revealed ? <View style={styles.rim} pointerEvents="none" /> : null}
           {revealed ? (
             children
           ) : (
